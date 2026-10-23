@@ -114,6 +114,10 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 #banner p { margin: 0; } #banner-title { white-space: nowrap; font-size: clamp(30px, 8vw, 46px); font-weight: 800; letter-spacing: -.02em; } #banner-sub { color: var(--teal); font-weight: 650; margin-top: 4px !important; white-space: nowrap; font-size: clamp(13px, 3.8vw, 16px); }
 #banner { max-width: calc(100vw - 24px - var(--sal) - var(--sar)); }
 @media (max-width: 520px) { #banner { padding: 14px 22px; } }
+/* hole-out hero shot: the cup is lower-left and the Rock's summit upper-right, so the banner sits over the green */
+@media (orientation: landscape) { #banner { top: auto; bottom: 25%; left: 70%; } }
+@media (orientation: portrait) { #banner { top: 49%; left: auto; right: calc(10px + var(--sar)); transform: none; } #banner { animation-name: popr; } }
+@keyframes popr { from { opacity: 0; transform: translateY(8px) scale(.96); } to { opacity: 1; transform: none; } }
 
 /* end card + info */
 #endcard, #info { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: calc(16px + var(--sat)) 16px calc(16px + var(--sab)); background: rgba(20, 20, 36, .32); }

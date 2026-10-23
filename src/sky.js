@@ -62,7 +62,8 @@ export function createSky() {
         float glow = pow(sdp, 18.0) * 0.38 + pow(sdp, 220.0) * 1.5;
         float rad = mix(0.0105, 0.02, low);
         float disc = smoothstep(cos(rad), cos(rad * 0.82), sd);
-        col += uSunCol * (glow * (0.5 + low) * (1.0 - c1 * 0.6) + disc * 22.0 * (1.0 - c1 * 0.9)) * day * vis;
+        // a low sun is kept a little gentler so its bloom doesn't wash out the trees and water beside it
+        col += uSunCol * (glow * (0.5 + low * 0.5) * (1.0 - c1 * 0.6) + disc * mix(22.0, 13.0, low) * (1.0 - c1 * 0.9)) * day * vis;
         // night sky
         if (uNight > 0.0) {
           vec2 sp = d.xz / (d.y + 1.0) * 260.0; vec2 cell = floor(sp);

@@ -102,14 +102,25 @@ export function createGrass(count) {
     const surf = surfaceAt(x, z); if (surf === 'water' || surf === 'green') return null;
     const sd = sandiness(x, z), dune = sd > 0.45, d = inland(x, z);
     if (d < 13) return null;
-    if (dune && R() > 0.5) return null;
+    if (dune) {
+      // dune grass grows in clumps with bare sand between (never a row along the strip), sparse and low near the green
+      const patch = fbm(x * 0.09 + 31, z * 0.09 - 7), gd = greenDist(x, z);
+      if (patch < 0.5 || R() > (patch - 0.5) * 3.2) return null;
+      if (gd < 40 && R() > 0.25 + gd / 60) return null;
+    }
     if (!dune && surf === 'sand') return null;
     if (R() > Math.max(0.1, 1 - np / 55)) return null;
-    const hgt = dune ? 0.5 + R() * 0.6 : 0.26 + R() * 0.32;
-    p.set(x, heightAt(x, z) - 0.03, z); q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, R() * 6.28);
-    s.set(1 + R() * 0.7, hgt, 1 + R() * 0.7);
-    const k = 0.85 + R() * 0.3, dry = fbm(x * 0.02, z * 0.02) > 0.58 ? 1 : 0;
-    if (dune) c.setRGB(0.36 * k, 0.33 * k, 0.15 * k); else if (dry) c.setRGB(0.3 * k, 0.26 * k, 0.1 * k); else c.setRGB(0.12 * k, 0.24 * k, 0.05 * k);
+    const near = dune ? Math.min(1, 0.55 + greenDist(x, z) / 70) : 1;
+    const hgt = dune ? (0.35 + R() * R() * 0.9) * near : 0.26 + R() * 0.32;
+    // a clump spreads around its centre: offset each tuft a little and lean it at its own angle
+    const jx = dune ? (R() - 0.5) * 1.6 : 0, jz = dune ? (R() - 0.5) * 1.6 : 0;
+    p.set(x + jx, heightAt(x + jx, z + jz) - 0.03, z + jz);
+    q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, R() * 6.28);
+    if (dune) { const la = R() * 6.28, lean = R() * 0.38; q.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(Math.cos(la), 0, Math.sin(la)), lean)); }
+    s.set((dune ? 0.7 + R() * 1.0 : 1 + R() * 0.7) * (dune ? 0.6 + hgt * 0.6 : 1), hgt, (dune ? 0.7 + R() * 1.0 : 1 + R() * 0.7) * (dune ? 0.6 + hgt * 0.6 : 1));
+    const k = 0.8 + R() * 0.4, dry = fbm(x * 0.02, z * 0.02) > 0.58 ? 1 : 0;
+    if (dune) { const st = R() * 0.7 + (fbm(x * 0.04 - 5, z * 0.04) - 0.4); c.setRGB(lerp(0.2, 0.37, st) * k, lerp(0.25, 0.33, st) * k, lerp(0.13, 0.15, st) * k); }
+    else if (dry) c.setRGB(0.3 * k, 0.26 * k, 0.1 * k); else c.setRGB(0.12 * k, 0.24 * k, 0.05 * k);
     return { color: true };
   });
 }
@@ -211,7 +222,7 @@ function bough(parts, pts, r0, r1, col, seg) {
 // a lumpy foliage tuft: sunlit top, darker body, dark underside, AO toward the crown centre. Normals are pulled
 // toward the centre of the tuft's branch cluster and of the whole crown (nrm: [[x, y, z, weight], ...]) so the
 // canopy shades as one soft volume broken into clumps rather than a stack of flat pads.
-function clump(c, rx, ry, rz, seed, pal, { detail = 1, flat = 0.8, droop = 0.7, ao = null, nrm = null, lift = 0.25 } = {}) {
+function clump(c, rx, ry, rz, seed, pal, { detail = 1, flat = 0.8, droop = 0.7, ao = null, nrm = null, lift = 0.25, band = null } = {}) {
   const g = posOnly(new THREE.IcosahedronGeometry(1, detail));
   const p = g.attributes.position, col = [];
   for (let i = 0; i < p.count; i++) {
@@ -221,7 +232,13 @@ function clump(c, rx, ry, rz, seed, pal, { detail = 1, flat = 0.8, droop = 0.7, 
     const X = c[0] + x * rx * k, Y = c[1] + y * ry * k * sy, Z = c[2] + z * rz * k;
     p.setXYZ(i, X, Y, Z);
     const hl = fbm3(x * 3 + seed, y * 3, z * 3, 2), top = Math.max(0, y);
-    const r = y > -0.25 ? pal.mid.map((m, j) => lerp(m, pal.top[j], Math.min(1, Math.max(0, top * 0.8 + (hl - 0.45) * 0.9)))) : pal.under;
+    let r;
+    if (band) {
+      // shade by height in the whole crown (band: [bottom, top]) so overlapping tufts read as one canopy, not stacked puffs
+      const gy = Math.min(1, Math.max(0, (Y - band[0]) / (band[1] - band[0])));
+      const w = Math.min(1, Math.max(0, 0.12 + gy * 0.7 + top * 0.3 + (hl - 0.45) * 0.8 - (y < -0.3 ? 0.18 : 0)));
+      r = w < 0.5 ? pal.under.map((u, j) => lerp(u, pal.mid[j], w * 2)) : pal.mid.map((m, j) => lerp(m, pal.top[j], w * 2 - 1));
+    } else r = y > -0.25 ? pal.mid.map((m, j) => lerp(m, pal.top[j], Math.min(1, Math.max(0, top * 0.8 + (hl - 0.45) * 0.9)))) : pal.under;
     let a = 1;
     if (ao) { const d = Math.hypot(X - ao[0], (Y - ao[1]) * 1.3, Z - ao[2]) / ao[3]; a = 0.4 + 0.6 * Math.min(1, Math.max(0, d)); }
     col.push(r[0] * a, r[1] * a, r[2] * a);
@@ -254,39 +271,55 @@ const oakBark = (x, y, z) => { const n = fbm3(x * 3, y * 3, z * 3, 2); return [0
 const cypBark = [0.11, 0.08, 0.065];
 
 function pineGeometry(seed, { H0 = 15, spread = 1 } = {}) {
+  // a mature coastal Monterey pine: tall bare trunk with a few broken lower limbs, one or two heavy limbs reaching
+  // sideways below the crown, and an irregular, flat-topped, wind-sheared canopy (pushed downwind, +x) built from
+  // overlapping needle-tuft masses on crowded upper limbs. Instances are yawed to the prevailing wind.
   const R = rng(seed), parts = [], H = H0 + R() * 2.5;
-  const lx = (R() - 0.5) * 1.4, lz = (R() - 0.5) * 0.8;
-  const T = (y) => [Math.sin(y * 0.21 + seed) * 0.3 + lx * (y / H) ** 1.5, y, Math.cos(y * 0.17 + seed) * 0.22 + lz * (y / H) ** 1.5];
-  bough(parts, [0, 0.25, 0.5, 0.75, 0.94].map((t) => { const q = T(t * H); if (t === 0) q[1] = -0.5; return q; }), 0.5 * spread + 0.05, 0.12, pineBark, 8);
-  // bare, broken lower limbs
-  for (let i = 0; i < 5; i++) { const y = H * (0.2 + R() * 0.24), a = R() * 6.28, l = 0.6 + R() * 1.4, s = T(y); parts.push(limb(s, [s[0] + Math.cos(a) * l, y - 0.35 + R() * 0.3, s[2] + Math.sin(a) * l], 0.07, 0.022, [0.2, 0.15, 0.11], 5)); }
-  const cc = T(H * 0.72), ao = [cc[0], cc[1] - 0.6, cc[2], 4.6 * spread];
-  const crownN = [cc[0], cc[1] - 1.5, cc[2], 0.55];
-  const nb = 11 + (R() * 3 | 0);
-  for (let i = 0; i < nb; i++) {
-    const t = i / (nb - 1), y = H * (0.45 + 0.45 * t) + (R() - 0.5) * 0.9, a = i * 2.39996 + (R() - 0.5) * 0.8;
-    const len = (5.6 - t * 3.6) * (0.7 + R() * 0.5) * spread, up = 0.22 + R() * 0.3 + t * 0.25;
-    const s0 = T(y), ca = Math.cos(a), sa = Math.sin(a);
-    const end = [s0[0] + ca * len, y + len * up, s0[2] + sa * len];
-    bough(parts, [s0, [s0[0] + ca * len * 0.5, y + len * up * 0.35, s0[2] + sa * len * 0.5], end], 0.16 - t * 0.07, 0.035, pineBark, 5);
-    if (t < 0.35 && R() < 0.25) continue;                                  // a bare limb keeps the crown open
-    // dense rounded clusters of needle tufts at the limb end, and sometimes on a side fork
-    const ends = [end];
-    if (len > 2.6 && R() < 0.6) { const fa = a + (R() < 0.5 ? 1 : -1) * (0.7 + R() * 0.5), fl = len * 0.45; const f0 = [lerp(s0[0], end[0], 0.5), lerp(s0[1], end[1], 0.5), lerp(s0[2], end[2], 0.5)]; const fe = [f0[0] + Math.cos(fa) * fl, f0[1] + fl * 0.45, f0[2] + Math.sin(fa) * fl]; bough(parts, [f0, fe], 0.07, 0.03, pineBark, 4); ends.push(fe); }
-    ends.forEach((e, ei) => {
-      const sz = (1 - t * 0.25) * (ei ? 0.8 : 1), cl = [e[0], e[1] + 0.35 * sz, e[2]], nt = 3 + (R() < 0.5 ? 1 : 0) + (ei ? 0 : 1);
-      for (let j = 0; j < nt; j++) {
-        const a2 = j * 2.4 + R(), d2 = j ? (0.6 + R() * 0.5) * sz : 0, r = (0.85 + R() * 0.35) * sz;
-        const c = [cl[0] + Math.cos(a2) * d2, cl[1] + (R() - 0.35) * 0.7 * sz, cl[2] + Math.sin(a2) * d2];
-        parts.push(clump(c, r * (1.05 + R() * 0.25), r * (0.9 + R() * 0.2), r * (1.05 + R() * 0.25), seed + i * 3.7 + j * 1.3 + ei * 11, PAL.pine, { flat: 0.9, droop: 0.72, ao, nrm: [[cl[0], cl[1] - 0.3, cl[2], 0.75], crownN] }));
-      }
-    });
+  const lx = (0.9 + R() * 0.9) * spread, lz = (R() - 0.5) * 0.7;
+  const T = (y) => [Math.sin(y * 0.21 + seed) * 0.28 + lx * (y / H) ** 1.7, y, Math.cos(y * 0.17 + seed) * 0.22 + lz * (y / H) ** 1.7];
+  bough(parts, [0, 0.25, 0.5, 0.75, 0.97].map((t) => { const q = T(t * H); if (t === 0) q[1] = -0.5; return q; }), 0.5 * spread + 0.05, 0.12, pineBark, 7);
+  // bare, broken lower limbs angled down
+  for (let i = 0; i < 5; i++) { const y = H * (0.22 + R() * 0.24), a = R() * 6.28, l = 0.5 + R() * 1.0, s = T(y); parts.push(limb(s, [s[0] + Math.cos(a) * l, y - 0.45 + R() * 0.35, s[2] + Math.sin(a) * l], 0.08, 0.02, [0.2, 0.15, 0.11], 4)); }
+  const cc = T(H * 0.82), ao = [cc[0] + 0.8 * spread, cc[1] - 0.8, cc[2], 5.6 * spread];
+  const crownN = [cc[0] + 0.8 * spread, cc[1] - 3.0, cc[2], 1.0];      // strong pull: the canopy shades as one mass
+  const flatTop = H + 0.5, band = [H * 0.46, flatTop];
+  const tuft = (c, rx, ry, rz, k, own) => {
+    const top = c[1] + ry * 0.75; if (top > flatTop) { const d = top - flatTop; c[1] -= d * 0.6; ry = Math.max(rx * 0.45, ry - d * 0.5); }
+    parts.push(clump(c, rx, ry, rz, seed + k, PAL.pine, { flat: 0.72, droop: 0.5, ao, nrm: [own, crownN], lift: 0.3, band }));
+  };
+  // limbs: two or three heavy ones low and long (some broken bare), then many short crowded ones in the upper crown
+  const low = 2 + (R() < 0.5 ? 1 : 0), nl = low + 8;
+  for (let i = 0; i < nl; i++) {
+    const isLow = i < low, t = isLow ? i / low : (i - low) / (nl - low - 1);
+    const y = isLow ? H * (0.42 + 0.08 * t) : H * (0.56 + 0.34 * t) + (R() - 0.5) * 0.6;
+    const a = i * 2.39996 + seed + (R() - 0.5) * 0.7, ca = Math.cos(a), sa = Math.sin(a), wind = 1 + 0.55 * ca, s0 = T(y);
+    let len = (isLow ? 4.6 + R() * 1.4 : 3.4 - t * 1.3 + R() * 0.8) * wind * spread;
+    const bare = isLow && R() < 0.6;
+    if (bare) len *= 0.5;
+    const mid = [s0[0] + ca * len * 0.55, y + len * 0.05, s0[2] + sa * len * 0.55], end = [s0[0] + ca * len, y + len * (0.22 + R() * 0.12), s0[2] + sa * len];
+    bough(parts, [s0, mid, end], isLow ? 0.22 : 0.16, 0.045, pineBark, 5);
+    if (bare) continue;
+    const sz = (isLow ? 0.95 : 1.05 + R() * 0.2) * spread, own = [end[0], end[1] - 0.9, end[2], 0.35];
+    const n = isLow ? 2 : 3;
+    for (let j = 0; j < n; j++) {
+      const u = (isLow ? 0.72 : 0.4) + j / Math.max(1, n - 1) * (isLow ? 0.4 : 0.7), w = (R() - 0.5) * 1.2 * sz;
+      const c = [s0[0] + ca * len * u - sa * w, lerp(y, end[1], Math.min(1, u)) + 0.35 + (R() - 0.3) * 0.5, s0[2] + sa * len * u + ca * w];
+      const r = (1.1 + R() * 0.4) * sz;
+      tuft(c, r * (1.15 + R() * 0.25), r * (0.72 + R() * 0.2), r * (1.0 + R() * 0.25), i * 3.7 + j * 1.3, own);
+    }
   }
-  // an irregular, rounded top
-  const tp = T(H * 0.95);
+  // a core around the upper trunk joins the limb masses into one irregular canopy
   for (let j = 0; j < 4; j++) {
-    const a = j * 1.9 + R(), r = j ? 1.0 + R() * 0.6 : 0;
-    parts.push(clump([tp[0] + Math.cos(a) * r, tp[1] + (j ? -0.4 - R() * 0.5 : 0.3), tp[2] + Math.sin(a) * r], 1.05 + R() * 0.35, 0.95, 1.0 + R() * 0.3, seed + 90 + j, PAL.pine, { flat: 0.85, droop: 0.6, ao, nrm: [[tp[0], tp[1] - 0.8, tp[2], 0.7], crownN] }));
+    const q = T(H * (0.62 + j * 0.08)), a = j * 2.6 + R(), o = (0.5 + R() * 0.5) * spread, r = (1.7 + R() * 0.4) * spread;
+    tuft([q[0] + 0.6 * spread + Math.cos(a) * o, q[1], q[2] + Math.sin(a) * o], r * 1.15, r * 0.75, r, 60 + j, [q[0], q[1] - 1, q[2], 0.4]);
+  }
+  // the crown top: broad tufts at nearly one height, pushed downwind, so the tree is flat-topped and sheared
+  const tp = T(H * 0.95), nt = 6 + (R() < 0.5 ? 1 : 0), ownT = [tp[0] + 0.8, tp[1] - 1.2, tp[2], 0.4];
+  for (let j = 0; j < nt; j++) {
+    const a = j * 2.2 + R() * 0.8, r = j ? (1.3 + R() * 1.5) * spread : 0, dx = Math.cos(a) * r * (Math.cos(a) > 0 ? 1.35 : 0.8);
+    const c = [tp[0] + 0.7 * spread + dx, tp[1] - 0.25 - r * 0.2 + (R() - 0.5) * 0.3, tp[2] + Math.sin(a) * r * 0.85];
+    const rr = (1.35 + R() * 0.4) * spread;
+    tuft(c, rr * 1.2, rr * 0.75, rr * (1.0 + R() * 0.2), 90 + j, ownT);
   }
   return parts;
 }
@@ -462,7 +495,7 @@ export function createTrees() {
       const mesh = new THREE.InstancedMesh(mergeTree(parts), mat, mine.length);
       mine.forEach((t, i) => {
         t.mesh = mesh; t.index = i; t.shadow = k.shadow;
-        t.yaw = k.kind === 'cyp' ? down + (R() - 0.5) * 0.5 : R() * 6.28;
+        t.yaw = k.kind === 'cyp' ? down + (R() - 0.5) * 0.5 : k.kind === 'pine' ? down + (R() - 0.5) * 1.1 : R() * 6.28;
         t.scale = new THREE.Vector3(t.sc * (0.9 + R() * 0.2), t.sc * (0.85 + R() * 0.3), t.sc * (0.9 + R() * 0.2));
         place(t);
       });

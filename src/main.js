@@ -58,7 +58,7 @@ function autoTier() {
 }
 const autoStart = autoTier();
 let qLevel = qMode === 'auto' ? autoStart : qMode;
-let post = null, W = 1, H = 1, dpr = 1;
+let post = null, W = 1, H = 1, dpr = 1, baseFov = 48;
 
 // ---------- world (filled during loading) ----------
 const W0 = {};
@@ -86,7 +86,7 @@ async function build() {
   W0.sky = createSky(); scene.add(W0.sky.mesh);
   scene.add(createHills());
   await loadStep('Raising Morro Rock', 0.35);
-  scene.add(createRock(touch ? 'med' : 'high')); scene.add(createStacks());
+  const rock = createRock(touch ? 'med' : 'high'); W0.crest = rock.userData.crest; scene.add(rock); scene.add(createStacks());
   W0.boats = createBoats(); scene.add(W0.boats);
   W0.wisps = createWisps(touch ? 45 : 70); scene.add(W0.wisps.points);
   W0.mist = createMist(depthTex, BOUNDS); scene.add(W0.mist.group);
@@ -152,9 +152,10 @@ function applyLook() {
   renderer.toneMappingExposure = look.exp * (1 + night * 0.2);
   // grade: moonlight is desaturated with lifted blue shadows; bloom only catches the moon, lights and glints at night
   gradeState.sat = 1.12 - night * 0.36; gradeState.lift.set(0.004, 0.011, 0.03).multiplyScalar(night);
-  gradeState.bloomS = night > 0.5 ? 0.55 : 0.36; gradeState.bloomT = night > 0.5 ? 0.75 : 1.0;
   // fill: opposite the key, warm at golden hour so the foreground reads gold rather than dark
   const low = night > 0.5 ? 0 : 1 - THREE.MathUtils.smoothstep(sp.elevation, 2, 22);
+  // a low sun sits in or near the frame: less, tighter bloom so the trees and inlet beside it stay readable
+  gradeState.bloomS = night > 0.5 ? 0.55 : 0.36 - low * 0.1; gradeState.bloomT = night > 0.5 ? 0.75 : 1.0 + low * 0.2; gradeState.bloomR = night > 0.5 ? 0.6 : 0.6 - low * 0.2;
   W0.low = low; W0.night = night;
   fill.position.set(-sunDir.x, 0.6, -sunDir.z).normalize().multiplyScalar(100); fill.target.position.set(0, 0, 0);
   if (night > 0.5) { fill.color.set(0x7c94cc); fill.intensity = 0.55; }
@@ -196,11 +197,11 @@ function applyLook() {
   $('time-text').textContent = `${phase} · ${clock} PT${timeOverride ? ' (preview)' : ''}`;
 }
 
-const gradeState = { sat: 1.12, lift: new V3(), bloomS: 0.36, bloomT: 1.0 };
+const gradeState = { sat: 1.12, lift: new V3(), bloomS: 0.36, bloomT: 1.0, bloomR: 0.6 };
 function applyGrade() {
   if (!post) return;
   if (post.grade) { post.grade.uniforms.uSat.value = gradeState.sat; post.grade.uniforms.uLift.value.copy(gradeState.lift); }
-  if (post.bloom) { post.bloom.strength = gradeState.bloomS; post.bloom.threshold = gradeState.bloomT; }
+  if (post.bloom) { post.bloom.strength = gradeState.bloomS; post.bloom.threshold = gradeState.bloomT; post.bloom.radius = gradeState.bloomR; }
 }
 
 // ---------- quality ----------
@@ -222,7 +223,7 @@ function setQuality(level, persist = true) {
 }
 function resize() {
   W = window.innerWidth; H = window.innerHeight;
-  camera.aspect = W / H; camera.fov = W < H ? 62 : 48; camera.updateProjectionMatrix();
+  camera.aspect = W / H; baseFov = W < H ? 62 : 48; if (G.state !== 'holed' && G.state !== 'end') camera.fov = baseFov; camera.updateProjectionMatrix();
   renderer.setSize(W, H, false); if (post) post.setSize(W, H);
   if (W0.trees) W0.trees.userData.frame(W < H);
   const focal = H / (2 * Math.tan(camera.fov * Math.PI / 360)) * (renderer.getPixelRatio() || 1);
@@ -595,7 +596,10 @@ function update(rdt) {
   bm.visible = ball.state !== 'holed' && ball.state !== 'water' || G.state === 'flight';
   if (ball.state === 'holed') {
     const c = cupPos(), k = Math.min(1, G.t / 0.18);
-    bm.visible = G.t < 0.8; bm.position.x += (c.x - bm.position.x) * k; bm.position.z += (c.z - bm.position.z) * k; bm.position.y -= Math.min(0.2, G.t * 0.5);
+    // drops in and stays nestled in the cup with its crown showing, so the hero shot reads "ball in the hole"
+    bm.visible = true;
+    bm.position.x += (c.x - bm.position.x) * k; bm.position.z += (c.z - bm.position.z) * k;
+    bm.position.y += (c.y + 0.025 - r * 0.2 - bm.position.y) * Math.min(1, G.t / 0.3);
   }
   const onPeg = ball.lie === 'tee' && ball.state === 'rest' && G.strokes === 0;
   W0.peg.visible = onPeg; if (onPeg) { W0.peg.scale.setScalar(r * 0.42); W0.peg.position.set(ball.p.x, bm.position.y - r * 0.98, ball.p.z); }
@@ -618,6 +622,7 @@ function holeOutPickup() {
 }
 
 function updateCamera(rdt, dt) {
+  if (G.state !== 'holed' && G.state !== 'end') lens(baseFov, damp(4, rdt));
   if (cam.free) { camera.position.set(cam.free[0], cam.free[1], cam.free[2]); camera.lookAt(cam.free[3], cam.free[4], cam.free[5]); return; }
   if (G.state === 'flyover') {
     fly.t += rdt;
@@ -637,7 +642,7 @@ function updateCamera(rdt, dt) {
   if (G.state === 'flight' || G.state === 'water' || G.state === 'holed') {
     if (G.state === 'holed') {
       cupShot(elapsed - G.holeT0);
-      camera.position.lerp(cup.pos, damp(3, rdt)); cam.look.lerp(cup.look, damp(4, rdt));
+      camera.position.lerp(cup.pos, damp(3, rdt)); cam.look.lerp(cup.look, damp(4, rdt)); lens(cup.fov, damp(3, rdt));
     } else if (G.slowmo) {
       // low and off to the side so the cup sits left of centre and the flagstick never blocks the drop
       const c = cupPos(), d = cam.dir, px = -d.y, pz = d.x;
@@ -660,29 +665,53 @@ function updateCamera(rdt, dt) {
   }
   if (G.state === 'end') {
     cupShot(elapsed - G.holeT0);
-    camera.position.lerp(cup.pos, damp(1.5, rdt)); cam.look.lerp(cup.look, damp(2, rdt)); camera.lookAt(cam.look);
+    camera.position.lerp(cup.pos, damp(1.5, rdt)); cam.look.lerp(cup.look, damp(2, rdt)); lens(cup.fov, damp(2, rdt)); camera.lookAt(cam.look);
     return;
   }
   camera.lookAt(cam.look);
 }
 
-// hole-out framing: ~3 m from the cup and ~1.2 m up, looking a touch down so the cup sits in the lower-left third
-// with Morro Rock filling the upper background, then a slow push-out and rise (continues under the end card)
-const cup = { pos: new V3(), look: new V3() };
-function cupShot(t) {
-  const c = cupPos(), tanV = Math.tan(camera.fov * Math.PI / 360), tanH = tanV * camera.aspect;
-  const te = Math.max(0, t - 3.2);
-  const D = 3.1 + Math.min(t, 3.2) * 0.2 + Math.min(te, 14) * 0.38, h = 1.2 + Math.min(t, 3.2) * 0.06 + Math.min(te, 14) * 0.12;
-  // cup at NDC (-0.45, -0.6) in landscape; higher and nearer the middle in portrait so it clears the bottom HUD
-  const portrait = camera.aspect < 1, ax = Math.atan((portrait ? 0.32 : 0.45) * tanH), ay = Math.atan((portrait ? 0.4 : 0.6) * tanV);
-  // face the rock so its east shoulder meets open sky at ~60% across the frame (landscape and portrait alike), drifting slowly
-  const edge = Math.atan2(ROCK.x + ROCK.rx * 1.1 - c.x, -(ROCK.z - c.z));
-  const psi = edge - Math.atan(0.6 * tanH) + te * 0.012;
-  const cy = psi - ax, hd = Math.sqrt(D * D - h * h);
-  cup.pos.set(c.x - Math.sin(cy) * hd, c.y + h, c.z + Math.cos(cy) * hd);
-  const pitch = ay - Math.atan2(h, hd);
-  cup.look.set(cup.pos.x + Math.sin(psi) * Math.cos(pitch) * 10, cup.pos.y + Math.sin(pitch) * 10, cup.pos.z - Math.cos(psi) * Math.cos(pitch) * 10);
+// hole-out hero framing. The Rock's summit is ~38 deg above the horizon from the green, so no normal lens can hold
+// both it and the cup: solve for the lens. The cup sits in the lower-left third, the summit upper-right with sky above,
+// the field of view is whatever puts both there (wide at first, narrowing as the camera pushes out and rises).
+const SUMMIT = new V3(), rockSpan = { mid: 0 };
+// the point of the Rock's outline that stands highest in view from p (the near shoulder of the dome, not the true summit),
+// and the azimuth of the middle of its upper flanks so the whole massif can be centred
+function rockTop(p) {
+  let best = -1, lo = 9, hi = -9; const a0 = Math.atan2(ROCK.x - p.x, -(ROCK.z - p.z));
+  for (const q of W0.crest) {
+    const e = (q.y - p.y) / Math.hypot(q.x - p.x, q.z - p.z); if (e > best) { best = e; SUMMIT.copy(q); }
+    const a = Math.atan2(q.x - p.x, -(q.z - p.z)) - a0; if (a < lo) lo = a; if (a > hi) hi = a;
+  }
+  SUMMIT.y += 4; rockSpan.mid = a0 + (lo + hi) / 2;
 }
+const cup = { pos: new V3(), look: new V3(), fov: 60 };
+const heroFrame = () => camera.aspect < 1
+  ? { cx: -0.4, cy: -0.4, sx: 0.04, sy: 0.5, maxT: 1.35 }       // portrait: cup above the bottom HUD, summit below the top chips
+  : { cx: -0.44, cy: -0.42, sx: 0.1, sy: 0.78, maxT: 1.0 };
+function cupShot(t) {
+  const c = cupPos(), f = heroFrame(), asp = camera.aspect, te = Math.max(0, t - 3.2);
+  const hd = 2.7 + Math.min(t, 3.2) * 0.12 + Math.min(te, 14) * 0.32, h = 0.62 + Math.min(t, 3.2) * 0.03 + Math.min(te, 14) * 0.07;
+  rockTop(cup.pos.lengthSq() ? cup.pos : c);
+  let T = Math.tan(cup.fov * Math.PI / 360), psi = 0, p = 0, cyaw = rockSpan.mid;
+  const P = cup.pos;
+  for (let k = 0; k < 5; k++) {
+    P.set(c.x - Math.sin(cyaw) * hd, c.y + h, c.z + Math.cos(cyaw) * hd);
+    // vertical angles of the Rock's top and the cup in the camera's forward plane
+    const azS = Math.atan2(SUMMIT.x - P.x, -(SUMMIT.z - P.z)), dS = Math.hypot(SUMMIT.x - P.x, SUMMIT.z - P.z);
+    const thS = Math.atan2(SUMMIT.y - P.y, dS * Math.cos(azS - psi)), thC = Math.atan2(c.y - P.y, hd * Math.cos(cyaw - psi));
+    // tan(thS - p) = sy*T and tan(thC - p) = cy*T  ->  bisect T; past maxT the top may climb to 0.93, then the cup drops
+    let lo = 0.2, hi = f.maxT;
+    for (let i = 0; i < 24; i++) { const m = (lo + hi) / 2; if (Math.atan(f.sy * m) - Math.atan(f.cy * m) < thS - thC) lo = m; else hi = m; }
+    T = (lo + hi) / 2; p = Math.max(thC - Math.atan(f.cy * T), thS - Math.atan(0.93 * T));
+    const phM = Math.atan(f.sx * T * asp * Math.cos(thS - p) / Math.cos(thS)), phC = Math.atan(f.cx * T * asp * Math.cos(thC - p) / Math.cos(thC));
+    psi = rockSpan.mid + te * 0.006 - phM; cyaw = psi + phC;
+  }
+  P.set(c.x - Math.sin(cyaw) * hd, c.y + h, c.z + Math.cos(cyaw) * hd);
+  cup.fov = Math.atan(T) * 360 / Math.PI;
+  cup.look.set(P.x + Math.sin(psi) * Math.cos(p) * 10, P.y + Math.sin(p) * 10, P.z - Math.cos(psi) * Math.cos(p) * 10);
+}
+function lens(fov, k) { if (Math.abs(camera.fov - fov) > 0.01) { camera.fov += (fov - camera.fov) * k; camera.updateProjectionMatrix(); } }
 
 function updatePin() {
   const el = $('pin');

@@ -99,6 +99,10 @@ export function createRock(quality = 'high') {
   m.position.set(ROCK.x, 0, ROCK.z); m.castShadow = true; m.receiveShadow = true;
   const g = new THREE.Group(); g.add(m);
   g.add(createBoulders(quality === 'low' ? 70 : 170));
+  // a sparse cloud of upper-flank points (world space) so cameras can frame the Rock's real silhouette
+  const crest = [];
+  for (let i = 0; i < p.count; i += 7) if (p.getY(i) > ROCK.h * 0.55) crest.push(new THREE.Vector3(p.getX(i) + ROCK.x, p.getY(i), p.getZ(i) + ROCK.z));
+  g.userData.crest = crest;
   return g;
 }
 
