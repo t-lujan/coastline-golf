@@ -15,7 +15,8 @@ export const BUNKERS = [
   { x: -15, z: -150, r: 5.2 },
   { x: 27, z: -18, r: 8 },
 ];
-export const ROCK = { x: -62, z: -350, rx: 132, rz: 100, h: 150 };
+export const ROCK = { x: -62, z: -350, rx: 132, rz: 100, h: 176 };
+export const CAUSEWAY = [[28, -276], [78, -176]];
 export const STACKS = [[330, -440], [352, -432], [374, -424]];
 export const PAR = 4;
 
@@ -49,7 +50,10 @@ export function inland(x, z) {
   let d = Math.min(west, north + Math.max(0, -x - 60) * 0.0);
   // the rock rises out of the bay on a shallow reef (turquoise water + surf around its base)
   const rr = Math.hypot((x - ROCK.x) / ROCK.rx, (z - ROCK.z) / ROCK.rz);
-  d = Math.max(d, (1 - rr) * 60 - 2.5);
+  d = Math.max(d, (1.18 - rr) * 60 - 2.5);   // the rock's talus foot reaches ~1.2x its ellipse
+  // the causeway: a low sand-and-riprap spit from the rock's south-east foot back to the shore
+  const cw = segDist(x, z, CAUSEWAY[0][0], CAUSEWAY[0][1], CAUSEWAY[1][0], CAUSEWAY[1][1]) + 2.5 * Math.sin(x * 0.07 + z * 0.05);
+  d = Math.max(d, Math.min(9, (13 - cw) * 0.9));
   return d;
 }
 function channelMask(x, z) { return sstep(CHANNEL.halfW + 9, CHANNEL.halfW - 2, Math.abs(z - CHANNEL.z) + 3 * Math.sin(x * 0.08)) * sstep(CHANNEL.endX + 6, CHANNEL.endX - 22, x); }

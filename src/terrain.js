@@ -28,10 +28,10 @@ export function bakeDepth(res = 256) {
   for (let j = 0; j < res; j++) for (let i = 0; i < res; i++) {
     const x = BOUNDS.minX + (i + 0.5) / res * (BOUNDS.maxX - BOUNDS.minX), z = BOUNDS.minZ + (j + 0.5) / res * (BOUNDS.maxZ - BOUNDS.minZ);
     let h = heightAt(x, z);
-    const rr = Math.hypot((x - ROCK.x) / ROCK.rx, (z - ROCK.z) / ROCK.rz); if (rr < 1.02) h = Math.max(h, 2);
+    const rr = Math.hypot((x - ROCK.x) / ROCK.rx, (z - ROCK.z) / ROCK.rz); if (rr < 1.2) h = Math.max(h, 2);
     const k = (j * res + i) * 4, v = Math.max(0, Math.min(255, Math.round(-h / 14 * 255)));
     data[k] = v; data[k + 2] = v; data[k + 3] = 255;
-    land[j * res + i] = rr < 1.18 ? 32 : Math.max(0, h);   // the rock's waterline bulge and boulders reach past its ellipse
+    land[j * res + i] = rr < 1.36 ? 32 : Math.max(0, h);   // the rock's waterline bulge and boulders reach past its ellipse
   }
   const R = 6, tmp = new Float32Array(res * res);
   for (let pass = 0; pass < 2; pass++) {

@@ -7,28 +7,39 @@ import { heightAt, surfaceAt, fairwayDist, greenDist, sandiness, teeDist, inland
 import { fbm3, rimUniforms, tameUniforms, GLSL_RIM_DECL, GLSL_RIM, GLSL_NOISE } from './noise.js';
 
 export const windUniforms = { uTime: { value: 0 }, uWind: { value: new THREE.Vector2(1, 0) }, uGust: { value: 0.5 } };
+// uLeafGlow: light scattered through the canopy (keeps backlit crowns from going black); uRagged: 0..1 leafy cut-out edges
+export const leafUniforms = { uLeafGlow: { value: new THREE.Color(0, 0, 0) }, uRagged: { value: 1 } };
 
 // deterministic random so the course is the same every visit
 export function rng(seed) { return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
-function swayMaterial(mat, strength, heightScale, { flatNormal = false, rim = false, foliage = false } = {}) {
+function swayMaterial(mat, strength, heightScale, { flatNormal = false, rim = false, foliage = false, holes = 0 } = {}) {
   mat.onBeforeCompile = (sh) => {
     if (rim) { Object.assign(sh.uniforms, rimUniforms); sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>\n${GLSL_RIM_DECL}`); }
     if (foliage) {
       // leaves: world-space clump breakup and bump so tufts read as foliage, not blobs; bark: vertical furrows
-      Object.assign(sh.uniforms, tameUniforms);
+      Object.assign(sh.uniforms, tameUniforms, leafUniforms);
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vFP;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvFP = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;');
-      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>\n${GLSL_NOISE}\nvarying vec3 vFP; uniform float uTame, uAerial;`)
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>\n${GLSL_NOISE}\nvarying vec3 vFP; uniform float uTame, uAerial, uRagged; uniform vec3 uLeafGlow;`)
         .replace('#include <color_fragment>', `#include <color_fragment>
           float isLeaf = ${foliage === 'all' ? '1.0' : 'step(diffuseColor.r * 1.15, diffuseColor.g)'};
           float lf = smoothstep(0.25, 0.75, cgN3(vFP * 1.3) * 0.6 + cgN3(vFP * 3.7) * 0.4);
           float furrow = cgN3(vec3(vFP.x * 7.0, vFP.y * 0.8, vFP.z * 7.0));
-          diffuseColor.rgb *= mix(0.62 + furrow * 0.55, 0.72 + lf * 0.5, isLeaf);
+          float speck = cgN3(vFP * 7.5) * 0.6 + cgN3(vFP * 17.0) * 0.4;                    // leaf clusters inside a tuft
+          diffuseColor.rgb *= mix(0.62 + furrow * 0.55, (0.72 + lf * 0.5) * (0.6 + speck * 0.75), isLeaf);
           vec3 leafTint = diffuseColor.rgb / max(diffuseColor.g, 0.002) * 0.6;`)
         .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+          ${foliage === 'all' ? '' : `// leafy silhouettes: cut the tuft edges away with noise so crowns read as foliage, not smooth stones
+          { float vd = length(vViewPosition), edge = 1.0 - abs(dot(normal, normalize(vViewPosition)));
+            float cutN = cgN3(vFP * 3.1) * 0.55 + cgN3(vFP * 8.3) * 0.45, far = smoothstep(50.0, 180.0, vd);
+            if (isLeaf > 0.5 && uRagged > 0.5) {
+              if (edge > 0.2 + cutN * 0.8 + far * 0.8) discard;                                  // ragged fringe
+              if (cutN < ${(holes * 0.3).toFixed(2)} * (1.0 - far) * (1.0 - edge * 0.5)) discard;  // sky gaps through sparse crowns
+            } }`}
           normal = cgBump(normal, -vViewPosition, (cgN3(vFP * 1.3) * 0.5 + cgN3(vFP * 3.7) * 0.2) * isLeaf, 0.5);`)
         .replace('#include <opaque_fragment>', `
           // a low warm sun keeps needles green instead of turning them orange
+          outgoingLight += diffuseColor.rgb * uLeafGlow * isLeaf * (0.6 + 0.4 * lf);   // light scattered through the canopy
           { float lum = dot(outgoingLight, vec3(0.3, 0.59, 0.11)); outgoingLight = mix(outgoingLight, lum * vec3(0.9, 1.07, 0.88), uTame * 0.5 * isLeaf); }
           ${rim ? `// backlit leaves glow yellow-green (light through needles), bark gets the plain rim
           { float rimD = dot(normal, normalize(vViewPosition)); float rimF = pow(1.0 - clamp(rimD, 0.0, 1.0), 2.5) * smoothstep(-0.3, 0.1, rimD);
@@ -160,7 +171,7 @@ export function createBeachRocks(count) {
   return scatter(mesh, count, rand, (R, pp, q, s, c, e) => {
     const x = -220 + R() * 340, z = -260 + R() * 500;
     const d = inland(x, z); if (d < -3 || d > 16) return null;
-    if (Math.hypot((x - ROCK.x) / ROCK.rx, (z - ROCK.z) / ROCK.rz) < 1.2) return null;
+    if (Math.hypot((x - ROCK.x) / ROCK.rx, (z - ROCK.z) / ROCK.rz) < 1.36) return null;
     if (fbm(x * 0.05, z * 0.05 + 3) < 0.48 && R() > 0.15) return null;
     pp.set(x, heightAt(x, z) - 0.05, z); e.set(R() * 0.6, R() * 6.28, R() * 0.6); q.setFromEuler(e);
     const sc = 0.15 + R() * R() * 1.1; s.set(sc * (1 + R() * 0.6), sc, sc);
@@ -227,12 +238,12 @@ function clump(c, rx, ry, rz, seed, pal, { detail = 1, flat = 0.8, droop = 0.7, 
 }
 // linear albedo; the sway shader adds leaf breakup, bark furrows and backlit translucency on top
 const PAL = {
-  pine: { top: [0.075, 0.15, 0.06], mid: [0.032, 0.078, 0.04], under: [0.014, 0.03, 0.022] },
-  euc: { top: [0.38, 0.47, 0.43], mid: [0.2, 0.28, 0.26], under: [0.12, 0.16, 0.155] },
-  oak: { top: [0.095, 0.155, 0.05], mid: [0.04, 0.08, 0.03], under: [0.015, 0.03, 0.016] },
-  cyp: { top: [0.08, 0.15, 0.07], mid: [0.035, 0.085, 0.045], under: [0.05, 0.07, 0.05] },
+  pine: { top: [0.11, 0.2, 0.075], mid: [0.05, 0.11, 0.05], under: [0.022, 0.045, 0.03] },
+  euc: { top: [0.3, 0.41, 0.33], mid: [0.15, 0.235, 0.2], under: [0.08, 0.12, 0.11] },
+  oak: { top: [0.12, 0.19, 0.06], mid: [0.055, 0.105, 0.04], under: [0.02, 0.04, 0.02] },
+  cyp: { top: [0.1, 0.18, 0.08], mid: [0.045, 0.1, 0.05], under: [0.05, 0.07, 0.05] },
 };
-const pineBark = (x, y, z) => { const n = fbm3(x * 4, y * 0.7, z * 4, 2); return [0.2 + n * 0.1, 0.095 + n * 0.045, 0.06 + n * 0.02]; };
+const pineBark = (x, y, z) => { const n = fbm3(x * 4, y * 0.7, z * 4, 2); return [0.19 + n * 0.08, 0.12 + n * 0.05, 0.085 + n * 0.03]; };
 const eucBark = (x, y, z) => {
   const n = fbm3(x * 1.3, y * 0.35, z * 1.3, 3), m = fbm3(x * 4 + 3, y * 1.2, z * 4, 2);
   let c = n > 0.56 ? [0.72, 0.68, 0.6] : n > 0.44 ? [0.56, 0.56, 0.53] : [0.64, 0.49, 0.37];   // cream, grey, tan peel
@@ -298,15 +309,16 @@ function eucGeometry(seed) {
       bough(parts, [s0, bm, be], 0.13, 0.03, eucBark, 5);
       // foliage hangs in loose, drooping clouds toward the branch tips
       const tip = [lerp(bm[0], be[0], 0.6), lerp(bm[1], be[1], 0.6) - 0.5, lerp(bm[2], be[2], 0.6)];
-      const nq = 3 + (R() < 0.5 ? 1 : 0);
+      const nq = 8 + (R() * 3 | 0);
       for (let q = 0; q < nq; q++) {
-        const qa = q * 2.3 + R(), qd = q ? 0.7 + R() * 0.6 : 0, r = 0.7 + R() * 0.3;
-        const c = [tip[0] + Math.cos(qa) * qd, tip[1] - q * 0.35 - R() * 0.4, tip[2] + Math.sin(qa) * qd];
-        parts.push(clump(c, r * 1.15, r * 0.9, r * 1.1, seed + l * 9 + b * 3 + q, PAL.euc, { flat: 0.75, droop: 1.3, ao, lift: 0.45, nrm: [[tip[0], tip[1] + 0.3, tip[2], 0.6], cc] }));
+        // many small, faceted hanging tufts stepping down from the twig: the open eucalyptus "curtain"
+        const qa = q * 2.3 + R(), qd = q ? 0.4 + R() * 1.1 : 0, r = 0.36 + R() * 0.26;
+        const c = [tip[0] + Math.cos(qa) * qd, tip[1] + 0.3 - q * 0.22 - R() * 0.5, tip[2] + Math.sin(qa) * qd];
+        parts.push(clump(c, r * 1.0, r * 1.35, r * 0.95, seed + l * 9 + b * 3 + q, PAL.euc, { detail: 0, flat: 0.75, droop: 1.5, ao, lift: 0.45, nrm: [[tip[0], tip[1] + 0.3, tip[2], 0.6], cc] }));
       }
-      if (R() < 0.6) { const c = [lerp(s0[0], bm[0], 0.7), lerp(s0[1], bm[1], 0.7) - 0.6, lerp(s0[2], bm[2], 0.7)]; parts.push(clump(c, 0.65, 0.6, 0.6, seed + l * 5 + b * 7, PAL.euc, { flat: 0.75, droop: 1.3, ao, lift: 0.45, nrm: [cc] })); }
+      if (R() < 0.6) for (let q = 0; q < 3; q++) { const c = [lerp(s0[0], bm[0], 0.7) + (R() - 0.5) * 0.9, lerp(s0[1], bm[1], 0.7) - 0.4 - q * 0.3, lerp(s0[2], bm[2], 0.7) + (R() - 0.5) * 0.9]; parts.push(clump(c, 0.4, 0.5, 0.4, seed + l * 5 + b * 7 + q, PAL.euc, { detail: 0, flat: 0.75, droop: 1.4, ao, lift: 0.45, nrm: [cc] })); }
     }
-    for (let q = 0; q < 4; q++) { const qa = q * 2.1 + R(), qd = q ? 0.8 + R() * 0.5 : 0; parts.push(clump([e[0] + Math.cos(qa) * qd, e[1] - 0.2 - q * 0.45, e[2] + Math.sin(qa) * qd], 0.95, 0.8, 0.9, seed + l * 13 + 70 + q, PAL.euc, { flat: 0.75, droop: 1.25, ao, lift: 0.45, nrm: [[e[0], e[1] + 0.2, e[2], 0.6], cc] })); }
+    for (let q = 0; q < 10; q++) { const qa = q * 2.1 + R(), qd = q ? 0.5 + R() * 1.1 : 0; parts.push(clump([e[0] + Math.cos(qa) * qd, e[1] + 0.2 - q * 0.22 - R() * 0.3, e[2] + Math.sin(qa) * qd], 0.48, 0.6, 0.46, seed + l * 13 + 70 + q, PAL.euc, { detail: 0, flat: 0.75, droop: 1.4, ao, lift: 0.45, nrm: [[e[0], e[1] + 0.2, e[2], 0.6], cc] })); }
   }
   return parts;
 }
@@ -374,13 +386,14 @@ function treeSpots() {
   const clearOf = (x, z, kind, minD) => !spots.some((s) => Math.hypot(s.x - x, s.z - z) < minD * (s.kind === 'oak' || kind === 'oak' ? 1.5 : 1));
   for (const h of HEROES) spots.push({ kind: h.kind, x: h.desk.x, z: h.desk.z, sc: h.sc, pri: 0, hero: h });
   // grove: n trees scattered through a blob, clumped in pairs and threes, mixed kinds and sizes; never a grid
-  const grove = (kinds, cx, cz, n, rad, { minD = 7, clear = 7, sc = [0.78, 1.18], pri = 1 } = {}) => {
+  const grove = (kinds, cx, cz, n, rad, { minD = 5.2, clear = 7, sc = [0.7, 1.22], pri = 1 } = {}) => {
     let placed = 0;
     for (let t = 0; placed < n && t < n * 80; t++) {
       const kind = Array.isArray(kinds) ? kinds[R() < 0.78 ? 0 : 1] : kinds;
       // half the time start a new clump, otherwise grow next to the last tree in this grove
-      const last = placed && R() < 0.5 ? spots[spots.length - 1] : null;
-      const a = R() * 6.28, r = last ? minD * (1.05 + R() * 0.5) : rad * Math.sqrt(R());
+      // crowns in a clump overlap a little, so a grove reads as a few masses with gaps rather than evenly spaced trees
+      const last = placed && R() < 0.62 ? spots[spots.length - 1] : null;
+      const a = R() * 6.28, r = last ? minD * (1.0 + R() * 0.35) : rad * Math.sqrt(R());
       const x = (last ? last.x : cx) + Math.cos(a) * r, z = (last ? last.z : cz) + Math.sin(a) * r * (last ? 1 : 0.75);
       if (!ok(x, z, kind, clear) || !clearOf(x, z, kind, minD)) continue;
       spots.push({ kind, x, z, sc: lerp(sc[0], sc[1], R()), pri: placed < Math.ceil(n * 0.5) ? pri : pri + 1 }); placed++;
@@ -427,10 +440,10 @@ export function createTrees() {
   // prevailing NW wind: crowns sheared toward the south-east
   const lean = (135 - HEADING) * Math.PI / 180, dx = Math.sin(lean), dz = -Math.cos(lean), down = Math.atan2(-dz, dx);
   const kinds = [
-    { kind: 'pine', geos: [pineGeometry(3), pineGeometry(17), pineGeometry(41, { H0: 12.5, spread: 0.85 })], h: 17, sway: 0.25, shadow: 5.5 },
-    { kind: 'euc', geos: [eucGeometry(7), eucGeometry(29)], h: 24, sway: 0.35, shadow: 4.8 },
-    { kind: 'oak', geos: [oakGeometry(11)], h: 8, sway: 0.15, shadow: 7.5 },
-    { kind: 'cyp', geos: [cypressGeometry(13)], h: 8, sway: 0.2, shadow: 5.5 },
+    { kind: 'pine', geos: [pineGeometry(3), pineGeometry(17), pineGeometry(41, { H0: 12.5, spread: 0.85 })], h: 17, sway: 0.25, shadow: 5.5, holes: 0.5 },
+    { kind: 'euc', geos: [eucGeometry(7), eucGeometry(29)], h: 24, sway: 0.35, shadow: 4.8, holes: 1 },
+    { kind: 'oak', geos: [oakGeometry(11)], h: 8, sway: 0.15, shadow: 7.5, holes: 0.2 },
+    { kind: 'cyp', geos: [cypressGeometry(13)], h: 8, sway: 0.2, shadow: 5.5, holes: 0.3 },
   ];
   const g = new THREE.Group(), meshes = [], m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
   const blobs = contactShadows(spots.length), up = new THREE.Vector3(0, 1, 0), nv = new THREE.Vector3(), qy = new THREE.Quaternion();
@@ -445,7 +458,7 @@ export function createTrees() {
     const list = spots.filter((t) => t.kind === k.kind);
     k.geos.forEach((parts, vi) => {
       const mine = list.filter((_, i) => i % k.geos.length === vi); if (!mine.length) return;
-      const mat = swayMaterial(new THREE.MeshLambertMaterial({ vertexColors: true }), k.sway, k.h, { rim: true, foliage: true });
+      const mat = swayMaterial(new THREE.MeshLambertMaterial({ vertexColors: true }), k.sway, k.h, { rim: true, foliage: true, holes: k.holes });
       const mesh = new THREE.InstancedMesh(mergeTree(parts), mat, mine.length);
       mine.forEach((t, i) => {
         t.mesh = mesh; t.index = i; t.shadow = k.shadow;

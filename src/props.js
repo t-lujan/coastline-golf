@@ -50,7 +50,7 @@ export function createFlag() {
 export function createTeeMarkers() {
   // classic mushroom tee markers in the palette, a tee sign, and a ball washer post
   const g = new THREE.Group();
-  const mats = [new THREE.MeshLambertMaterial({ color: 0x1d4f8c }), new THREE.MeshLambertMaterial({ color: 0x1d4f8c })];
+  const mats = [new THREE.MeshLambertMaterial({ color: 0x4f9fc4 }), new THREE.MeshLambertMaterial({ color: 0x4f9fc4 })];
   const stem = new THREE.CylinderGeometry(0.02, 0.02, 0.04, 6), cap = new THREE.SphereGeometry(0.1, 18, 12);
   [[-4.2, 0], [4.2, 1]].forEach(([dx, mi]) => {
     const y = TEE.h; const s = new THREE.Mesh(stem, mats[mi]); s.position.set(TEE.x + dx, y + 0.06, TEE.z - 1.5);

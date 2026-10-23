@@ -2,6 +2,7 @@
 // turquoise shallows), sparkling sun/moon glints with a wide glitter path at low sun, and surf that rolls up the beach.
 import * as THREE from 'three';
 import { GLSL_NOISE } from './noise.js';
+import { ROCK } from './course.js';
 
 export function createWater({ depthTex, bounds, segments }) {
   const uniforms = {
@@ -10,6 +11,7 @@ export function createWater({ depthTex, bounds, segments }) {
     uDeep: { value: new THREE.Color('#042540') }, uMid: { value: new THREE.Color('#0a4f6e') }, uShallow: { value: new THREE.Color('#1aa9a6') }, uSandy: { value: new THREE.Color('#5fc4b0') },
     uDepth: { value: depthTex }, uBounds: { value: new THREE.Vector4(bounds.minX, bounds.minZ, bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) },
     uFogColor: { value: new THREE.Color() }, uFogDensity: { value: 0.001 }, uNight: { value: 0 }, uWind: { value: new THREE.Vector2(1, 0) }, uLow: { value: 0 },
+    uRock: { value: new THREE.Vector4(ROCK.x, ROCK.z, ROCK.rx * 1.15, ROCK.rz * 1.15) }, uRockH: { value: ROCK.h * 1.04 }, uRockCol: { value: new THREE.Color(0.1, 0.1, 0.1) },
   };
   const mat = new THREE.ShaderMaterial({
     uniforms,
@@ -24,9 +26,17 @@ export function createWater({ depthTex, bounds, segments }) {
       }`,
     fragmentShader: /* glsl */`
       uniform float uTime, uSunI, uFogDensity, uNight, uLow; uniform vec3 uSunDir, uSunCol, uZen, uHor, uDeep, uMid, uShallow, uSandy, uFogColor;
-      uniform sampler2D uDepth; uniform vec4 uBounds; uniform vec2 uWind;
+      uniform sampler2D uDepth; uniform vec4 uBounds; uniform vec2 uWind; uniform vec4 uRock; uniform float uRockH; uniform vec3 uRockCol;
       varying vec3 vW; varying float vDepthV;
       ${GLSL_NOISE}
+      // Morro Rock as an ellipsoid: it hides the sun glitter behind it and shows up in the reflection
+      float rockHit(vec3 o, vec3 d){
+        vec3 sc = vec3(uRock.z, uRockH, uRock.w), oc = (o - vec3(uRock.x, 0.0, uRock.y)) / sc, dd = d / sc;
+        float a = dot(dd, dd), b = dot(oc, dd), c = dot(oc, oc) - 1.0, h = b * b - a * c;
+        if (h <= 0.0) return 0.0;
+        float t = (-b - sqrt(h)) / a;
+        return step(0.0, t) * smoothstep(0.0, 0.05 * a, h);
+      }
       vec2 waveSlope(vec2 p, float t, float detail){
         vec2 s = vec2(0.0);
         for (int i = 0; i < 10; i++){
@@ -58,6 +68,8 @@ export function createWater({ depthTex, bounds, segments }) {
         vec3 L = normalize(uSunDir);
         vec3 sky = mix(uHor, uZen, pow(max(R.y, 0.0), 0.5));
         sky += uSunCol * pow(max(dot(R, L), 0.0), 6.0) * 0.35 * (0.3 + uLow) * (1.0 - uNight);
+        float rockR = R.y > 0.0 ? rockHit(vW, R) : 0.0, rockS = rockHit(vW, L);
+        sky = mix(sky, uRockCol, rockR * 0.92);
         // body colour: deep blue offshore, turquoise over sand, glassy near the beach
         float dd = depth;
         vec3 body = mix(uDeep, uMid, exp(-dd * 0.08));
@@ -78,7 +90,7 @@ export function createWater({ depthTex, bounds, segments }) {
         // the wide glitter path; by moonlight it breaks into a shimmer of small flecks instead of a solid streak
         float fleck = mix(1.0, 0.15 + 1.3 * step(0.58, cgN2(vW.xz * vec2(2.6, 1.1) + uTime * vec2(0.9, 0.4))), uNight);
         spec += pow(rl, 14.0) * uLow * 1.1 * (0.6 + 0.8 * cgN2(vW.xz * 0.9 + uTime)) * fleck;
-        col += uSunCol * spec * uSunI * step(0.0, L.y);
+        col += uSunCol * spec * uSunI * step(0.0, L.y) * (1.0 - rockS);
         // surf: bands rolling toward the beach and a bright lip at the waterline
         float fn = cgN2(vW.xz * 0.35 + uTime * 0.25) * 0.6 + cgN2(vW.xz * 1.3 - uTime * 0.4) * 0.4;
         // foam lines: a sharp leading edge rolling toward the beach with a soft, broken trail behind it

@@ -12,17 +12,18 @@ One signature par 4 on the San Luis Obispo coast, built with three.js. You tee o
   - If the request fails, the game uses typical coastal conditions and the HUD says so.
 - **Real time of day.** The solar position for Morro Rock at the current `America/Los_Angeles` time drives the sun, sky, fog colour and exposure: morning haze, midday, golden hour, then a moonlit night.
 - **Rendering**
-  - Custom GLSL water: analytic waves, fresnel sky reflection, sun glints and shoreline foam from a baked depth map.
+  - Morro Rock as a 176 m dacite dome at the end of its causeway: steep jointed walls, weathered and guano-streaked upper faces, a dark wet foot with tumbled boulders. The rock also shows in the bay's reflection and blocks the sun glitter behind it.
+  - Custom GLSL water: analytic waves, fresnel sky reflection, turquoise shallows, sun and moon glitter paths, and foam lines rolling in from a baked depth map.
   - Gradient sky with sun glow, layered clouds, stars and a moon with a glitter path on the bay.
   - Low-poly terrain painted from baked distance fields: fairway stripes, green checkerboard, bunkers with lips, dunes and beach.
-  - Instanced, wind-swayed dune grass, coastal scrub and the Morro Bay tree mix: Monterey pine, blue-gum eucalyptus, coast live oak and a few windswept cypress, with soft contact shadows.
+  - Instanced, wind-swayed dune grass, coastal scrub, magenta ice plant and the Morro Bay tree mix: Monterey pine, blue-gum eucalyptus, coast live oak and a few windswept cypress. The crowns have ragged leafy edges, light scattering through the canopy, soft contact shadows and distance haze.
   - Shadows, bloom, ACES tone mapping, a light grade with vignette, and SMAA or FXAA.
-- **Adaptive quality.** Auto mode measures the frame rate and steps from High to Medium to Low (DPR, bloom, anti-aliasing, shadow size, grass, scatter and tree counts). Or pick a level from the HUD.
+- **Adaptive quality.** Auto mode picks a starting level from the device: High on desktops, Medium on phones and tablets, and Low on very weak hardware. It then measures the frame rate and steps down a level whenever it drops below 48 fps. Each step lowers DPR, bloom, anti-aliasing, shadow size, grass, scatter and tree counts, and Low also drops the leafy cut-outs. You can also pick a level from the HUD.
 - **Golf physics**
   - Quadratic drag, backspin lift and wind drift scaled by height.
   - Per-surface bounce and rolling friction, with gravity along the slope of the green.
   - Lip-outs, plus a water hazard with a penalty stroke and a drop.
-- **Cinematics.** A skippable opening flyover, a chase camera with a shot tracer, and a slow-motion cup cam when a putt is dropping. Confetti when you hole out.
+- **Cinematics.** A skippable opening flyover, a chase camera with a shot tracer, and a slow-motion cup cam when a putt is dropping. On a hole-out, the pin is pulled and the camera finds a low shot past the cup to the rock, with paper confetti and a sparkle burst.
 - **Audio.** Surf, gulls, the strike, the splash and the cup rattle are synthesised with WebAudio. There are no audio files. Sound starts on your first tap, and there is a mute toggle.
 
 ## URL options

@@ -8,7 +8,7 @@ import { createWater } from './water.js';
 import { createTerrain, createHills, bakeDepth } from './terrain.js';
 import { createStacks, createFlag, createTeeMarkers, createTeePeg, createBall, createGulls } from './props.js';
 import { createRock } from './rock.js';
-import { windUniforms, createGrass, createTrees, createShrubs, createFlowers, createIcePlant, createBeachRocks, createDriftwood } from './vegetation.js';
+import { windUniforms, leafUniforms, createGrass, createTrees, createShrubs, createFlowers, createIcePlant, createBeachRocks, createDriftwood } from './vegetation.js';
 import { createBoats, createWisps, createMist } from './atmos.js';
 import { rimUniforms, tameUniforms } from './noise.js';
 import { Ball, BALL_R, CLUBS, SURF, predict } from './physics.js';
@@ -48,7 +48,16 @@ scene.add(hemi, sun, sun.target, fill, fill.target);
 
 let qMode = params.get('quality') || localStorage.getItem('cg-quality') || 'auto';
 if (!['auto', 'high', 'med', 'low'].includes(qMode)) qMode = 'auto';
-let qLevel = qMode === 'auto' ? 'high' : qMode;
+// auto starts from a guess at the device class, then steps down if the frame rate drops below 48
+function autoTier() {
+  const cores = navigator.hardwareConcurrency || 8, mem = navigator.deviceMemory || 8;
+  const small = Math.min(screen.width || innerWidth, screen.height || innerHeight) < 600;
+  if (cores <= 2 || mem <= 2 || (touch && (mem <= 3 || cores <= 3))) return 'low';   // very weak
+  if (touch || small || cores <= 4 || mem <= 4) return 'med';                         // phones, tablets, small laptops
+  return 'high';
+}
+const autoStart = autoTier();
+let qLevel = qMode === 'auto' ? autoStart : qMode;
 let post = null, W = 1, H = 1, dpr = 1;
 
 // ---------- world (filled during loading) ----------
@@ -123,7 +132,7 @@ async function build() {
 }
 
 // ---------- light, sky, fog from real time + weather ----------
-const sunDir = new V3(), moonDir = new V3();
+const sunDir = new V3(), moonDir = new V3(), tmpC = new THREE.Color();
 function applyLook() {
   if (!timeOverride) simDate = new Date();
   const sp = sunPosition(simDate), el = sp.elevation * Math.PI / 180, az = (sp.azimuth - HEADING) * Math.PI / 180;
@@ -161,6 +170,8 @@ function applyLook() {
   const w = W0.water.uniforms;
   w.uSunDir.value.copy(night > 0.5 ? moonDir : sunDir); w.uSunCol.value.copy(night > 0.5 ? new THREE.Color(0x9fb4ff) : look.sun);
   w.uSunI.value = night > 0.5 ? 0.75 * (1 - weather.cloud / 140) : look.sunI; w.uZen.value.copy(look.zen); w.uHor.value.copy(look.hor);
+  // what the rock looks like in the bay's reflection: its sky-lit side, a touch of the key
+  w.uRockCol.value.setRGB(0.34, 0.33, 0.31).multiply(hemi.color).multiplyScalar(hemi.intensity * 0.85).add(tmpC.copy(sun.color).multiplyScalar(Math.min(2, sun.intensity) * 0.05));
   w.uFogColor.value.copy(fogC); w.uFogDensity.value = scene.fog.density; w.uNight.value = night; w.uLow.value = night > 0.5 ? 0.7 : low;
   const ms = weather.windMph * 0.44704, wl = Math.hypot(weather.wind.x, weather.wind.z) || 1;
   const strength = Math.min(1.3, Math.max(0.15, ms / 8));
@@ -171,7 +182,9 @@ function applyLook() {
   W0.gulls.visible = night < 0.5 && weather.fogFactor < 0.8;
   W0.ballMesh.material.emissive.set(night > 0.5 ? 0x9fe8e8 : 0x334044); W0.ballMesh.material.emissiveIntensity = night > 0.5 ? 1.4 : 0.25;
   // warm low sun: pull the rock and foliage back toward natural colours; distant trees fade into the haze
-  tameUniforms.uTame.value = low * (1 - night); tameUniforms.uRelief.value = 1 - low * 0.45 - (night > 0.5 ? 0.4 : 0); tameUniforms.uAerial.value = night > 0.5 ? 0.12 : 0.22 + weather.fogFactor * 0.2;
+  tameUniforms.uTame.value = low * (1 - night); tameUniforms.uNightK.value = night; tameUniforms.uRelief.value = 1 - low * 0.45 - (night > 0.5 ? 0.4 : 0); tameUniforms.uAerial.value = night > 0.5 ? 0.12 : 0.22 + weather.fogFactor * 0.2;
+  // light scattered through the canopy: warm at golden hour, cool and faint by moonlight
+  leafUniforms.uLeafGlow.value.copy(sun.color).multiplyScalar(Math.min(2.5, sun.intensity) * (night > 0.5 ? 0.06 : 0.1 + low * 0.16));
   applyGrade();
   // HUD
   const clock = laClock(simDate);
@@ -201,6 +214,7 @@ function setQuality(level, persist = true) {
   if (W0.grass) W0.grass.count = Math.floor(W0.grassMax * q.grass);
   if (W0.scatter) for (const [k, m] of Object.entries(W0.scatter)) { m.count = Math.floor(m.userData.max * q[k]); m.visible = m.count > 0; }
   if (W0.trees) W0.trees.userData.setQuality(level);
+  leafUniforms.uRagged.value = level === 'low' ? 0 : 1;
   const cap = level[0].toUpperCase() + level.slice(1);
   $('q-label').textContent = qMode === 'auto' ? 'Auto' : cap; $('q-level').textContent = qMode === 'auto' ? ` · ${cap}` : '';
   if (persist) localStorage.setItem('cg-quality', qMode);
@@ -458,7 +472,7 @@ $('btn-sound').addEventListener('click', () => { audio.unlock(); audio.setMuted(
 syncSound();
 $('btn-quality').addEventListener('click', () => {
   const order = ['auto', 'high', 'med', 'low']; qMode = order[(order.indexOf(qMode) + 1) % 4];
-  setQuality(qMode === 'auto' ? 'high' : qMode); perf.locked = false; perf.frames = 0; perf.t0 = performance.now();
+  setQuality(qMode === 'auto' ? autoStart : qMode); perf.locked = false; perf.frames = 0; perf.t0 = performance.now();
   toast(`Graphics: ${$('q-label').textContent}${$('q-level').textContent}`, 1100);
 });
 const openInfo = () => { $('info').hidden = false; };
@@ -659,8 +673,11 @@ function cupShot(t) {
   const c = cupPos(), tanV = Math.tan(camera.fov * Math.PI / 360), tanH = tanV * camera.aspect;
   const te = Math.max(0, t - 3.2);
   const D = 3.1 + Math.min(t, 3.2) * 0.2 + Math.min(te, 14) * 0.38, h = 1.2 + Math.min(t, 3.2) * 0.06 + Math.min(te, 14) * 0.12;
-  const ax = Math.atan(0.45 * tanH), ay = Math.atan(0.6 * tanV);            // cup at NDC (-0.45, -0.6)
-  const psi = Math.atan2(ROCK.x - 10 - c.x, -(ROCK.z - c.z)) + te * 0.012;  // face the rock's summit, drifting slowly
+  // cup at NDC (-0.45, -0.6) in landscape; higher and nearer the middle in portrait so it clears the bottom HUD
+  const portrait = camera.aspect < 1, ax = Math.atan((portrait ? 0.32 : 0.45) * tanH), ay = Math.atan((portrait ? 0.4 : 0.6) * tanV);
+  // face the rock so its east shoulder meets open sky at ~60% across the frame (landscape and portrait alike), drifting slowly
+  const edge = Math.atan2(ROCK.x + ROCK.rx * 1.1 - c.x, -(ROCK.z - c.z));
+  const psi = edge - Math.atan(0.6 * tanH) + te * 0.012;
   const cy = psi - ax, hd = Math.sqrt(D * D - h * h);
   cup.pos.set(c.x - Math.sin(cy) * hd, c.y + h, c.z + Math.cos(cy) * hd);
   const pitch = ay - Math.atan2(h, hd);
@@ -686,7 +703,7 @@ function updateWindArrow() {
 if (TEST) {
   window.__golf = {
     get state() { return G.state; }, get strokes() { return G.strokes; }, get ball() { return { ...ball.p, state: ball.state, lie: ball.lie }; },
-    get fps() { return perf.fps; }, get fpsHistory() { return perf.history.slice(); }, get frameMs() { return { update: +perf.upd.toFixed(2), render: +perf.ren.toFixed(2) }; }, info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }), get quality() { return qLevel; }, get weather() { return weather; }, errors,
+    get fps() { return perf.fps; }, get fpsHistory() { return perf.history.slice(); }, get frameMs() { return { update: +perf.upd.toFixed(2), render: +perf.ren.toFixed(2) }; }, info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }), get quality() { return qLevel; }, autoStart, get weather() { return weather; }, errors,
     get yaw() { return G.yaw; }, W0, camera,
     shoot: (club, power, angleDeg = 0) => { if (club) setClub(club, true); return shoot(G.club, power, G.yaw + angleDeg * Math.PI / 180); },
     freeCam: (...a) => { cam.free = a.length ? a : null; update(1 / 30); post.render(); },
