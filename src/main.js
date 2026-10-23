@@ -1,13 +1,16 @@
 // Coastline Golf · Hole 1 · Morro Rock
 import * as THREE from 'three';
-import { TEE, CUP, GREEN, PAR, ROCK, STACKS, BOUNDS, heightAt, surfaceAt } from './course.js';
+import { TEE, CUP, GREEN, PAR, ROCK, STACKS, BOUNDS, HEADING, heightAt, surfaceAt } from './course.js';
 import { sunPosition, sceneDate, laClock, lookFor } from './sun.js';
 import { getWeather, compass } from './weather.js';
 import { createSky } from './sky.js';
 import { createWater } from './water.js';
 import { createTerrain, createHills, bakeDepth } from './terrain.js';
-import { createRock, createStacks, createFlag, createTeeMarkers, createBall, createGulls } from './props.js';
-import { windUniforms, createGrass, createCypress, CYPRESS_SPOTS } from './vegetation.js';
+import { createStacks, createFlag, createTeeMarkers, createTeePeg, createBall, createGulls } from './props.js';
+import { createRock } from './rock.js';
+import { windUniforms, createGrass, createTrees, createShrubs, createFlowers, createIcePlant, createBeachRocks, createDriftwood } from './vegetation.js';
+import { createBoats, createWisps, createMist } from './atmos.js';
+import { rimUniforms } from './noise.js';
 import { Ball, BALL_R, CLUBS, SURF, predict } from './physics.js';
 import { Ribbon, groundLine, createMarker, Particles, puff, confetti } from './fx.js';
 import { QUALITY, createPost } from './post.js';
@@ -39,7 +42,8 @@ const sun = new THREE.DirectionalLight(0xffffff, 2.5);
 sun.castShadow = true; sun.shadow.intensity = 0.8;
 Object.assign(sun.shadow.camera, { left: -75, right: 75, top: 75, bottom: -75, near: 1, far: 900 });
 sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.04;
-scene.add(hemi, sun, sun.target);
+const fill = new THREE.DirectionalLight(0xffffff, 0.3);
+scene.add(hemi, sun, sun.target, fill, fill.target);
 
 let qMode = params.get('quality') || localStorage.getItem('cg-quality') || 'auto';
 if (!['auto', 'high', 'med', 'low'].includes(qMode)) qMode = 'auto';
@@ -60,7 +64,7 @@ async function build() {
   const weatherP = getWeather(params);
   await loadStep('Shaping the coastline', 0.1);
   const big = !touch;
-  const depthTex = bakeDepth(256);
+  const depthTex = bakeDepth(512);
   const terrain = createTerrain({ segX: big ? 300 : 230, segZ: big ? 310 : 238, paintRes: big ? 1024 : 768 });
   scene.add(terrain.mesh);
   const corridor = createTerrain({ segX: big ? 100 : 70, segZ: big ? 290 : 205, paint: terrain.paint, offset: 1, bounds: { minX: -60, maxX: 80, minZ: -178, maxZ: 232 } });
@@ -72,7 +76,10 @@ async function build() {
   W0.sky = createSky(); scene.add(W0.sky.mesh);
   scene.add(createHills());
   await loadStep('Raising Morro Rock', 0.35);
-  scene.add(createRock()); scene.add(createStacks());
+  scene.add(createRock(touch ? 'med' : 'high')); scene.add(createStacks());
+  W0.boats = createBoats(); scene.add(W0.boats);
+  W0.wisps = createWisps(touch ? 45 : 70); scene.add(W0.wisps.points);
+  W0.mist = createMist(depthTex, BOUNDS); scene.add(W0.mist.group);
   // aviation beacons on the stacks
   W0.beacons = [];
   const bmat = new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 0.3, 0.2), fog: false });
@@ -80,14 +87,17 @@ async function build() {
   W0.bmat = bmat;
   W0.flag = createFlag(); scene.add(W0.flag.group);
   scene.add(createTeeMarkers());
+  W0.peg = createTeePeg(); scene.add(W0.peg);
   W0.gulls = createGulls(touch ? 7 : 11); scene.add(W0.gulls);
   await loadStep('Planting cypress and dune grass', 0.55);
-  W0.grassMax = touch ? 7000 : 15000;
+  W0.grassMax = touch ? 9000 : 20000;
   W0.grass = createGrass(W0.grassMax); W0.grassMax = W0.grass.count; scene.add(W0.grass);
-  scene.add(createCypress(CYPRESS_SPOTS));
+  W0.scatter = { flowers: createFlowers(touch ? 2600 : 5000), ice: createIcePlant(touch ? 1400 : 2600), rocks: createBeachRocks(touch ? 260 : 420), drift: createDriftwood(40), shrubs: createShrubs(touch ? 700 : 1100) };
+  for (const m of Object.values(W0.scatter)) scene.add(m);
+  W0.trees = createTrees(touch ? 'med' : 'high'); scene.add(W0.trees);
   // ball, effects
   W0.ballMesh = createBall(); scene.add(W0.ballMesh);
-  W0.tracer = new Ribbon(260, 0xf2fbfa, 0.85, 0.0042, 0.035); scene.add(W0.tracer.mesh);
+  W0.tracer = new Ribbon(260, 0xf2fbfa, 0.6, 0.003, 0.016); scene.add(W0.tracer.mesh);
   W0.aimLine = new Ribbon(200, 0xe1f5f3, 0.7, 0.0022, 0.03); scene.add(W0.aimLine.mesh);
   W0.marker = createMarker(); scene.add(W0.marker);
   W0.parts = new Particles(900); scene.add(W0.parts.points);
@@ -115,33 +125,45 @@ async function build() {
 const sunDir = new V3(), moonDir = new V3();
 function applyLook() {
   if (!timeOverride) simDate = new Date();
-  const sp = sunPosition(simDate), el = sp.elevation * Math.PI / 180, az = sp.azimuth * Math.PI / 180;
+  const sp = sunPosition(simDate), el = sp.elevation * Math.PI / 180, az = (sp.azimuth - HEADING) * Math.PI / 180;
   sunDir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)).normalize();
-  const mel = Math.max(0.3, Math.min(0.95, -el)), maz = az + Math.PI;
+  const mel = 0.4, maz = -0.7;   // art-directed: the moon hangs front-left over the bay so its path lies on the water
   moonDir.set(Math.sin(maz) * Math.cos(mel), Math.sin(mel), -Math.cos(maz) * Math.cos(mel)).normalize();
   look = lookFor(sp.elevation, weather);
   const night = THREE.MathUtils.smoothstep(-sp.elevation, 2, 9); // 0 day → 1 night
   look.nightK = night; look.elev = sp.elevation;
-  hemi.color.copy(look.hemiS); hemi.groundColor.copy(look.hemiG); hemi.intensity = look.hemiI * 0.78 * (1 + night * 0.5) * (1 + Math.max(0, Math.min(1, 1 - sp.elevation / 12)) * 0.7 * (1 - night));
+  hemi.color.copy(look.hemiS); hemi.groundColor.copy(look.hemiG); hemi.intensity = look.hemiI * 0.78 * (1 + night * 0.15) * (1 + Math.max(0, Math.min(1, 1 - sp.elevation / 12)) * 0.7 * (1 - night));
   if (night > 0.5) { sun.color.set(0xa9c0ff); sun.intensity = 1.0 * (1 - weather.cloud / 180); W0.lightDir = moonDir; }
   else { sun.color.copy(look.sun); sun.intensity = Math.max(0.05, look.sunI * 0.8); W0.lightDir = sunDir; }
   const fogC = look.hor.clone();
   scene.fog.color.copy(fogC);
-  const base = Math.min(0.0024, Math.max(0.00075, 1.73 / Math.max(300, weather.visibility)));
-  scene.fog.density = THREE.MathUtils.lerp(base, 0.0026, weather.fogFactor * 0.85);
-  renderer.toneMappingExposure = look.exp * (1 + night * 0.45);
+  const base = Math.min(0.0022, Math.max(0.00042, 1.4 / Math.max(300, weather.visibility)));
+  scene.fog.density = THREE.MathUtils.lerp(base, 0.0024, weather.fogFactor * 0.85);
+  renderer.toneMappingExposure = look.exp * (1 + night * 0.2);
+  if (post && post.grade) post.grade.uniforms.uSat.value = 1.14 - night * 0.32;
+  // fill: opposite the key, warm at golden hour so the foreground reads gold rather than dark
+  const low = night > 0.5 ? 0 : 1 - THREE.MathUtils.smoothstep(sp.elevation, 2, 22);
+  W0.low = low; W0.night = night;
+  fill.position.set(-sunDir.x, 0.6, -sunDir.z).normalize().multiplyScalar(100); fill.target.position.set(0, 0, 0);
+  if (night > 0.5) { fill.color.set(0x7088c0); fill.intensity = 0.25; }
+  else { fill.color.copy(look.hor).lerp(new THREE.Color(0xffc08a), low * 0.6); fill.intensity = 0.25 + low * 0.75; }
+  W0.mist.uniforms.uCol.value.copy(look.hor).lerp(new THREE.Color(1, 1, 1), 0.35);
+  const morning = night < 0.5 && sp.azimuth < 180 && sp.elevation < 22 ? 1 : 0;
+  W0.mist.uniforms.uAmt.value = Math.max(weather.fogFactor * 0.85, morning * 0.55);
+  W0.mist.group.visible = W0.mist.uniforms.uAmt.value > 0.02;
+  W0.wisps.uniforms.uCol.value.copy(look.hor).lerp(new THREE.Color(1, 1, 1), 0.5).multiplyScalar(night > 0.5 ? 0.35 : 1);
   const s = W0.sky.uniforms;
   s.uZen.value.copy(look.zen); s.uHor.value.copy(look.hor); s.uSunCol.value.copy(look.sun); s.uSunDir.value.copy(sunDir); s.uMoonDir.value.copy(moonDir);
   s.uNight.value = night; s.uCloud.value = look.cloud; s.uFog.value = look.fog;
   const w = W0.water.uniforms;
   w.uSunDir.value.copy(night > 0.5 ? moonDir : sunDir); w.uSunCol.value.copy(night > 0.5 ? new THREE.Color(0x9fb4ff) : look.sun);
-  w.uSunI.value = night > 0.5 ? 0.35 : look.sunI; w.uZen.value.copy(look.zen); w.uHor.value.copy(look.hor);
-  w.uFogColor.value.copy(fogC); w.uFogDensity.value = scene.fog.density; w.uNight.value = night;
+  w.uSunI.value = night > 0.5 ? 0.9 * (1 - weather.cloud / 140) : look.sunI; w.uZen.value.copy(look.zen); w.uHor.value.copy(look.hor);
+  w.uFogColor.value.copy(fogC); w.uFogDensity.value = scene.fog.density; w.uNight.value = night; w.uLow.value = night > 0.5 ? 0.7 : low;
   const ms = weather.windMph * 0.44704, wl = Math.hypot(weather.wind.x, weather.wind.z) || 1;
   const strength = Math.min(1.3, Math.max(0.15, ms / 8));
   windUniforms.uWind.value.set(weather.wind.x / wl * strength, weather.wind.z / wl * strength);
   windUniforms.uGust.value = 0.6 + Math.min(0.8, (weather.gustMph - weather.windMph) / 15);
-  w.uWind.value.set(weather.wind.x / wl, weather.wind.z / wl);
+  w.uWind.value.set(weather.wind.x / wl, weather.wind.z / wl); s.uWind.value.set(weather.wind.x / wl, weather.wind.z / wl); W0.wisps.uniforms.uWind.value.set(weather.wind.x / wl * Math.min(1.5, 0.3 + ms / 6), weather.wind.z / wl * Math.min(1.5, 0.3 + ms / 6));
   W0.flag.uniforms.uWind.value = Math.min(1.2, ms / 9);
   W0.gulls.visible = night < 0.5 && weather.fogFactor < 0.8;
   W0.ballMesh.material.emissive.set(night > 0.5 ? 0x9fe8e8 : 0x334044); W0.ballMesh.material.emissiveIntensity = night > 0.5 ? 1.4 : 0.25;
@@ -164,14 +186,18 @@ function setQuality(level, persist = true) {
   post = createPost(renderer, scene, camera, level, W, H, dpr);
   sun.shadow.mapSize.set(q.shadow, q.shadow); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
   if (W0.grass) W0.grass.count = Math.floor(W0.grassMax * q.grass);
+  if (W0.scatter) for (const [k, m] of Object.entries(W0.scatter)) { m.count = Math.floor(m.userData.max * q[k]); m.visible = m.count > 0; }
   const cap = level[0].toUpperCase() + level.slice(1);
   $('q-label').textContent = qMode === 'auto' ? 'Auto' : cap; $('q-level').textContent = qMode === 'auto' ? ` · ${cap}` : '';
   if (persist) localStorage.setItem('cg-quality', qMode);
+  resize();
 }
 function resize() {
   W = window.innerWidth; H = window.innerHeight;
   camera.aspect = W / H; camera.fov = W < H ? 62 : 48; camera.updateProjectionMatrix();
   renderer.setSize(W, H, false); if (post) post.setSize(W, H);
+  const focal = H / (2 * Math.tan(camera.fov * Math.PI / 360)) * (renderer.getPixelRatio() || 1);
+  if (W0.parts) W0.parts.mat.uniforms.uScale.value = focal * 0.21; if (W0.wisps) W0.wisps.uniforms.uScale.value = focal * 0.42;
 }
 window.addEventListener('resize', resize);
 
@@ -193,13 +219,13 @@ function setClub(c, manual = false) {
 }
 function aimPose(club = G.club, yaw = G.yaw) {
   const putt = club === 'putter', p = ball.p;
-  const dist = putt ? 3.4 : club === 'iron' ? 7.5 : 9, h = putt ? 1.2 : club === 'iron' ? 2.6 : 3.0;
+  const dist = putt ? 3.4 : club === 'iron' ? 7 : 8, h = putt ? 1.2 : club === 'iron' ? 2.3 : 2.5;
   const dx = Math.sin(yaw), dz = -Math.cos(yaw);
   const cx = p.x - dx * dist, cz = p.z - dz * dist;
   const pos = new V3(cx, Math.max(p.y, heightAt(cx, cz) + 0.6, 0.6) + h, cz);
-  const ahead = putt ? Math.max(2.5, Math.min(7, distToCup())) : 70;
+  const ahead = putt ? Math.max(2.5, Math.min(7, distToCup())) : Math.min(130, Math.max(60, distToCup() * 0.6));
   const lx = p.x + dx * ahead, lz = p.z + dz * ahead;
-  const lk = new V3(lx, putt ? heightAt(lx, lz) : Math.max(p.y, heightAt(lx, lz)) + 1.5, lz);
+  const lk = new V3(lx, putt ? heightAt(lx, lz) : Math.max(p.y, heightAt(lx, lz)) + 2.2 + ahead * 0.012, lz);
   return { pos, look: lk };
 }
 function tweenTo(pose, dur) { cam.from = { pos: camera.position.clone(), look: cam.look.clone() }; cam.to = pose; cam.tt = 0; cam.dur = dur; }
@@ -213,7 +239,7 @@ function prepareShot(dur = 1.6) {
   updateHud();
 }
 function resetHole() {
-  ball.place(TEE.x, TEE.z); ball.p.y += 0.02;
+  ball.place(TEE.x, TEE.z); ball.p.y += 0.035;
   Object.assign(G, { strokes: 0, putts: 0, longest: 0, penalties: 0, manualClub: false, timeScale: 1 });
   W0.tracer.clear(); W0.tracer.fade = 0; W0.marker.visible = false; W0.aimLine.set([]);
   $('endcard').hidden = true; $('banner').hidden = true;
@@ -319,12 +345,20 @@ async function share() {
 }
 
 // ---------- flyover ----------
-const fly = {
-  pos: new THREE.CatmullRomCurve3([new V3(-330, 70, -520), new V3(-275, 55, -330), new V3(-110, 40, -175), new V3(-20, 24, -95), new V3(30, 20, 40), new V3(36, 14, 150)], false, 'centripetal'),
-  look: new THREE.CatmullRomCurve3([new V3(-70, 70, -300), new V3(-70, 50, -300), new V3(-20, 10, -190), new V3(CUP.x, 3, CUP.z), new V3(4, 4, -60), new V3(15, 4, 60)], false, 'centripetal'),
-  dur: 6.6, t: 0,
-};
+// a cinematic reveal: low over the bay toward the rock, across the shallows to the flag, then a long
+// rising pull-back down the fairway that lands exactly on the tee camera
+const fly = { pos: null, look: null, dur: 7.6, t: 0 };
+function buildFlyover() {
+  G.yaw = yawTo(CUP.x, CUP.z);
+  const end = aimPose('driver', G.yaw);
+  const c = cupPos();
+  fly.pos = new THREE.CatmullRomCurve3([new V3(-360, 8, -480), new V3(-255, 16, -250), new V3(-95, 18, -168), new V3(-6, 5.5, -118),
+    new V3(14, 22, -40), new V3(26, 16, 110), end.pos], false, 'centripetal', 0.5);
+  fly.look = new THREE.CatmullRomCurve3([new V3(ROCK.x, 70, ROCK.z), new V3(ROCK.x + 10, 60, ROCK.z), new V3(c.x, 6, c.z - 40), new V3(c.x, c.y + 1.6, c.z),
+    new V3(c.x - 4, 8, c.z - 30), new V3(6, 6, -60), end.look], false, 'centripetal', 0.5);
+}
 function startFlyover() {
+  buildFlyover();
   G.state = 'flyover'; fly.t = 0;
   $('flytitle').hidden = false; $('flytitle').classList.add('show');
 }
@@ -464,7 +498,15 @@ function frame(now) {
 function update(rdt) {
   const dt = rdt * G.timeScale; elapsed += rdt;
   windUniforms.uTime.value = elapsed; W0.water.uniforms.uTime.value = elapsed; W0.sky.uniforms.uTime.value = elapsed; W0.flag.uniforms.uTime.value = elapsed;
-  W0.gulls.userData.update(elapsed);
+  W0.gulls.userData.update(elapsed); W0.boats.userData.update(elapsed);
+  W0.wisps.uniforms.uTime.value = elapsed; W0.mist.uniforms.uTime.value = elapsed;
+  // the pin is pulled on hole-out so the flagstick never blocks the celebration shot
+  { const fg = W0.flag.group, ud = fg.userData; if (ud.y0 === undefined) ud.y0 = fg.position.y;
+    ud.pull = (G.state === 'holed' || G.state === 'end') ? Math.min(1, (ud.pull || 0) + rdt * 1.4) : 0;
+    fg.position.y = ud.y0 + ud.pull * ud.pull * 4; fg.visible = ud.pull < 0.97; }
+  // rim light: strongest when looking toward a low sun
+  { const f = camera.getWorldDirection(tmp); const k = Math.max(0, (f.x * sunDir.x + f.z * sunDir.z) / (Math.hypot(sunDir.x, sunDir.z) || 1));
+    rimUniforms.uRimCol.value.copy(sun.color).multiplyScalar((0.12 + k * k * 0.9) * (0.3 + W0.low) * (1 - W0.night) * Math.min(1.2, sun.intensity)); rimUniforms.uRimK.value = 1; }
   W0.bmat.color.setRGB(4 * (0.25 + 0.75 * (Math.sin(elapsed * 2.2) > 0.6 ? 1 : 0.15)), 0.25, 0.2);
   lookTimer += rdt; if (lookTimer > 30) { lookTimer = 0; applyLook(); }
 
@@ -522,6 +564,8 @@ function update(rdt) {
   bm.scale.setScalar(r); bm.position.set(ball.p.x, ball.p.y - BALL_R + r * (ball.state === 'flight' ? 1 : 0.92) + (ball.state === 'rest' ? meshOffset() : 0), ball.p.z);
   bm.visible = ball.state !== 'holed' && ball.state !== 'water' || G.state === 'flight';
   if (ball.state === 'holed') { bm.visible = G.t < 0.25; bm.position.y -= G.t * 0.4; }
+  const onPeg = ball.lie === 'tee' && ball.state === 'rest' && G.strokes === 0;
+  W0.peg.visible = onPeg; if (onPeg) { W0.peg.scale.setScalar(r * 0.42); W0.peg.position.set(ball.p.x, bm.position.y - r * 0.98, ball.p.z); }
 
   // shadow camera follows the action
   const f = G.state === 'flyover' ? cam.look : tmp.set(ball.p.x, ball.p.y, ball.p.z);
@@ -541,10 +585,11 @@ function holeOutPickup() {
 }
 
 function updateCamera(rdt, dt) {
+  if (cam.free) { camera.position.set(cam.free[0], cam.free[1], cam.free[2]); camera.lookAt(cam.free[3], cam.free[4], cam.free[5]); return; }
   if (G.state === 'flyover') {
     fly.t += rdt;
     const u = ease(Math.min(1, fly.t / fly.dur));
-    camera.position.copy(fly.pos.getPoint(u)); cam.look.copy(fly.look.getPoint(u)); camera.lookAt(cam.look);
+    camera.position.copy(fly.pos.getPointAt(u)); cam.look.copy(fly.look.getPointAt(u)); camera.lookAt(cam.look);
     if (fly.t > fly.dur) endFlyover(false);
     return;
   }
@@ -559,11 +604,13 @@ function updateCamera(rdt, dt) {
   if (G.state === 'flight' || G.state === 'water' || G.state === 'holed') {
     if (G.slowmo || G.state === 'holed') {
       // low camera at the cup
-      const c = cupPos(), d = cam.dir;
-      const want = new V3(c.x - d.x * 1.5 + d.y * 0.6, c.y + 0.38, c.z - d.y * 1.5 - d.x * 0.6);
-      if (G.state === 'holed') { const a = Math.atan2(-d.x, -d.y) + 0.9 + G.t * 0.22; want.set(c.x + Math.sin(a) * (3.2 + G.t * 0.6), c.y + 1.3 + G.t * 0.35, c.z + Math.cos(a) * (3.2 + G.t * 0.6)); }
-      camera.position.lerp(want, damp(G.state === 'holed' ? 1.6 : 4, rdt));
-      cam.look.lerp(tmp.set(c.x, c.y + 0.05, c.z), damp(6, rdt));
+      // low and off to the side so the cup sits left of centre and the flagstick never blocks the drop
+      const c = cupPos(), d = cam.dir, px = -d.y, pz = d.x;
+      const hl = G.state === 'holed';
+      const back = hl ? 3.2 + G.t * 0.9 : 1.8, side = hl ? 2.0 + G.t * 0.4 : 0.9;
+      const want = new V3(c.x - d.x * back + px * side, c.y + (hl ? 1.35 + G.t * 0.45 : 0.34), c.z - d.y * back + pz * side);
+      camera.position.lerp(want, damp(hl ? 2.2 : 4, rdt));
+      cam.look.lerp(tmp.set(c.x - px * (hl ? 1.6 : 0.55) + d.x * (hl ? 1.5 : 0), c.y + (hl ? 0.9 + G.t * 0.25 : 0.12), c.z - pz * (hl ? 1.6 : 0.55) + d.y * (hl ? 1.5 : 0)), damp(5, rdt));
     } else if (G.state === 'flight') {
       const hv = Math.hypot(ball.v.x, ball.v.z);
       if (hv > 0.5) { cam.dir.lerp(new THREE.Vector2(ball.v.x / hv, ball.v.z / hv), damp(2, rdt)).normalize(); }
@@ -610,6 +657,7 @@ if (TEST) {
     get fps() { return perf.fps; }, get fpsHistory() { return perf.history.slice(); }, get frameMs() { return { update: +perf.upd.toFixed(2), render: +perf.ren.toFixed(2) }; }, info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }), get quality() { return qLevel; }, get weather() { return weather; }, errors,
     get yaw() { return G.yaw; }, W0, camera,
     shoot: (club, power, angleDeg = 0) => { if (club) setClub(club, true); return shoot(G.club, power, G.yaw + angleDeg * Math.PI / 180); },
+    freeCam: (...a) => { cam.free = a.length ? a : null; update(1 / 30); post.render(); },
     advance: (sec, step = 1 / 30) => { for (let t = 0; t < sec; t += step) update(step); post.render(); },
     flyAt: (sec) => { fly.t = sec; },
     skip: () => { if (G.state === 'flyover') endFlyover(true); },

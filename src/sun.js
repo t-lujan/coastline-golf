@@ -41,12 +41,12 @@ export function laClock(date) {
 const C = (h) => new Color(h);
 // key frames by sun elevation (degrees)
 const KEYS = [
-  { el: -18, zen: C('#03060f'), hor: C('#0b1426'), sun: C('#9fb4ff'), sunI: 0.0, hemiS: C('#2a3a66'), hemiG: C('#0a0d16'), hemiI: 0.35, exp: 0.9 },
-  { el: -6, zen: C('#0b1430'), hor: C('#3a3456'), sun: C('#ff8a5c'), sunI: 0.0, hemiS: C('#4b4a7a'), hemiG: C('#1a1622'), hemiI: 0.45, exp: 0.95 },
-  { el: 0, zen: C('#24366a'), hor: C('#f08a5d'), sun: C('#ff7a3d'), sunI: 0.9, hemiS: C('#8a7aa6'), hemiG: C('#3a2a2a'), hemiI: 0.6, exp: 1.0 },
-  { el: 6, zen: C('#3d63a8'), hor: C('#f6b987'), sun: C('#ffb36b'), sunI: 2.0, hemiS: C('#a6b6d6'), hemiG: C('#5a4a3a'), hemiI: 0.75, exp: 1.0 },
-  { el: 18, zen: C('#3f7fc4'), hor: C('#cfe3ea'), sun: C('#fff1d8'), sunI: 2.8, hemiS: C('#bcd8ec'), hemiG: C('#6b6a4e'), hemiI: 0.85, exp: 1.0 },
-  { el: 60, zen: C('#2f77c9'), hor: C('#d6ecf2'), sun: C('#ffffff'), sunI: 3.1, hemiS: C('#cfe6f5'), hemiG: C('#6f6e52'), hemiI: 0.9, exp: 1.0 },
+  { el: -18, zen: C('#040917'), hor: C('#13203d'), sun: C('#9fb4ff'), sunI: 0.0, hemiS: C('#3a4f86'), hemiG: C('#10141f'), hemiI: 0.5, exp: 0.95 },
+  { el: -6, zen: C('#101a3a'), hor: C('#4c3d5e'), sun: C('#ff8a5c'), sunI: 0.0, hemiS: C('#5d5a8a'), hemiG: C('#211a22'), hemiI: 0.6, exp: 1.0 },
+  { el: 0, zen: C('#22356c'), hor: C('#f2925c'), sun: C('#ff7f3a'), sunI: 1.3, hemiS: C('#c99a8a'), hemiG: C('#5a3a26'), hemiI: 0.95, exp: 1.05 },
+  { el: 6, zen: C('#2c5598'), hor: C('#f4b27a'), sun: C('#ffad62'), sunI: 2.5, hemiS: C('#e2b89a'), hemiG: C('#6a5232'), hemiI: 1.0, exp: 1.02 },
+  { el: 18, zen: C('#1f5cad'), hor: C('#a9cfe2'), sun: C('#ffe9c8'), sunI: 3.0, hemiS: C('#a9c8e6'), hemiG: C('#5a5a32'), hemiI: 0.95, exp: 0.98 },
+  { el: 60, zen: C('#174f9e'), hor: C('#9fc8df'), sun: C('#fff8ee'), sunI: 3.2, hemiS: C('#a3c4e4'), hemiG: C('#585a34'), hemiI: 0.95, exp: 0.95 },
 ];
 export function lookFor(elev, weather) {
   let i = 0; while (i < KEYS.length - 2 && elev > KEYS[i + 1].el) i++;
@@ -56,8 +56,8 @@ export function lookFor(elev, weather) {
   const cloud = (weather?.cloud ?? 20) / 100, fog = weather?.fogFactor ?? 0;
   // overcast flattens the sky and dims the sun; marine layer turns it grey
   const grey = new Color('#aeb9bf').multiplyScalar(Math.min(1, 0.35 + Math.max(0, elev + 6) / 30));
-  L.zen.lerp(grey, cloud * 0.45 + fog * 0.6); L.hor.lerp(grey.clone().multiplyScalar(1.05), cloud * 0.35 + fog * 0.75);
-  L.sunI *= 1 - cloud * 0.45 - fog * 0.4; L.hemiI *= 1 + cloud * 0.12;
+  L.zen.lerp(grey, cloud * 0.32 + fog * 0.6); L.hor.lerp(grey.clone().multiplyScalar(1.05), cloud * 0.28 + fog * 0.75);
+  L.sunI *= 1 - cloud * 0.35 - fog * 0.4; L.hemiI *= 1 + cloud * 0.12;
   L.night = elev < -6;
   L.cloud = cloud; L.fog = fog;
   return L;

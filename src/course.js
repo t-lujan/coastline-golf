@@ -1,5 +1,7 @@
-// Course layout for Hole 1 · Morro Rock. Units are metres. North is -Z, east is +X.
+// Course layout for Hole 1 · Morro Rock. Units are metres. The hole plays along world -Z,
+// which points to compass bearing HEADING (WNW, like looking at the rock from the state park).
 export const WATER_LEVEL = 0;
+export const HEADING = 290;
 export const BOUNDS = { minX: -620, maxX: 620, minZ: -720, maxZ: 560 };
 
 export const TEE = { x: 22, z: 205, w: 7, d: 5, h: 3.4 };
@@ -13,8 +15,7 @@ export const BUNKERS = [
   { x: -15, z: -150, r: 5.2 },
   { x: 27, z: -18, r: 8 },
 ];
-export const ROCK = { x: -75, z: -310, rx: 118, rz: 82, h: 150 };
-export const SPIT = { a: [-30, -178], b: [-62, -262], halfW: 16 };
+export const ROCK = { x: -62, z: -350, rx: 132, rz: 100, h: 150 };
 export const STACKS = [[330, -440], [352, -432], [374, -424]];
 export const PAR = 4;
 
@@ -46,12 +47,9 @@ export function inland(x, z) {
   const west = x - shoreX(z);
   const north = z - (-186 + 9 * Math.sin(x * 0.02));             // ocean north of the green
   let d = Math.min(west, north + Math.max(0, -x - 60) * 0.0);
-  // causeway out to the rock
-  const ds = SPIT.halfW - segDist(x, z, ...SPIT.a, ...SPIT.b);
-  d = Math.max(d, ds);
-  // the rock's footprint sits on a little sandy base
-  const rr = Math.hypot((x - ROCK.x) / (ROCK.rx * 1.08), (z - ROCK.z) / (ROCK.rz * 1.08));
-  d = Math.max(d, (1 - rr) * 40);
+  // the rock rises out of the bay on a shallow reef (turquoise water + surf around its base)
+  const rr = Math.hypot((x - ROCK.x) / ROCK.rx, (z - ROCK.z) / ROCK.rz);
+  d = Math.max(d, (1 - rr) * 60 - 2.5);
   return d;
 }
 function channelMask(x, z) { return sstep(CHANNEL.halfW + 9, CHANNEL.halfW - 2, Math.abs(z - CHANNEL.z) + 3 * Math.sin(x * 0.08)) * sstep(CHANNEL.endX + 6, CHANNEL.endX - 22, x); }
@@ -70,7 +68,9 @@ export function heightAt(x, z) {
   let land = 2.9 + roll + east;
   // dunes between beach and course
   const duneBand = sstep(10, 22, d) * (1 - sstep(48, 70, d));
-  land += duneBand * (2.5 + 6 * fbm(x * 0.03 + 3, z * 0.03 - 1)) * (1 - sstep(35, 15, fairwayDist(x, z)) * 0.9);
+  // keep the dunes low behind the green so the rock stays in view from the putting surface
+  const nearGreen = 1 - sstep(30, 85, greenDist(x, z));
+  land += duneBand * (2.5 + 6 * fbm(x * 0.03 + 3, z * 0.03 - 1)) * (1 - sstep(35, 15, fairwayDist(x, z)) * 0.9) * (1 - nearGreen * 0.8);
   let h;
   if (d < 0) h = -0.4 + d * 0.11;                                   // sea floor
   else if (d < 14) h = lerp(-0.4, 1.4, d / 14);                     // beach

@@ -2,39 +2,6 @@
 import * as THREE from 'three';
 import { ROCK, STACKS, CUP, TEE, heightAt, fbm } from './course.js';
 
-export function createRock() {
-  const geo = new THREE.IcosahedronGeometry(1, 5);
-  const p = geo.attributes.position, colors = [];
-  const top = new THREE.Color('#a39a8c'), mid = new THREE.Color('#7d746a'), dark = new THREE.Color('#4a433d'), moss = new THREE.Color('#66704a'), guano = new THREE.Color('#d8d2c4');
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
-    const ang = Math.atan2(z, x);
-    const n = fbm(x * 2.6 + 5, z * 2.6 + y * 2) - 0.5, n2 = fbm(x * 8, z * 8 + y * 5) - 0.5;
-    const yy = Math.max(y, -0.15);
-    const prof = Math.pow(Math.max(yy + 0.15, 0) / 1.15, 0.62);
-    // vertical gullies + a few horizontal ledges
-    const gully = Math.abs(Math.sin(ang * 9 + n * 5)) ;
-    const ledge = Math.sin(prof * 22 + n * 4) * 0.5 + 0.5;
-    const r = 1 + n * 0.3 + n2 * 0.07 - (1 - gully) * 0.05 * (0.4 + prof) + ledge * 0.015;
-    let px = x * r * ROCK.rx * (1 - prof * 0.42) - prof * 22, pz = z * r * ROCK.rz * (1 - prof * 0.34);
-    let py = (prof * ROCK.h * (1 + n * 0.12) + n2 * 5) * (yy > -0.14 ? 1 : 0) - 6;
-    if (x > 0.25 && yy < 0.45) py *= 0.78 + 0.1 * n;                 // eastern shoulder (the old quarry side)
-    p.setXYZ(i, px, py, pz);
-    const t = Math.min(1, Math.max(0, py / ROCK.h));
-    const c = dark.clone().lerp(mid, Math.min(1, 0.25 + t * 2.2)).lerp(top, Math.max(0, t - 0.35) * 1.2);
-    c.lerp(dark, (1 - gully) * 0.45);
-    if (t < 0.3 && n > -0.02) c.lerp(moss, 0.5 * (1 - t / 0.3));
-    if (t > 0.7 && n2 > 0.12) c.lerp(guano, 0.45);
-    c.multiplyScalar(0.92 + n2 * 0.45);
-    colors.push(c.r, c.g, c.b);
-  }
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  const g2 = geo.index ? geo.toNonIndexed() : geo; g2.computeVertexNormals();
-  const m = new THREE.Mesh(g2, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
-  m.position.set(ROCK.x, 0, ROCK.z); m.castShadow = true; m.receiveShadow = true;
-  return m;
-}
-
 export function createStacks() {
   const g = new THREE.Group();
   const white = new THREE.MeshLambertMaterial({ color: 0xd9dcd8, flatShading: true });
@@ -80,12 +47,35 @@ export function createFlag() {
   return { group: g, flag, uniforms };
 }
 export function createTeeMarkers() {
+  // classic mushroom tee markers in the palette, a tee sign, and a ball washer post
   const g = new THREE.Group();
-  const m1 = new THREE.MeshLambertMaterial({ color: 0x2c6a8c }), m2 = new THREE.MeshLambertMaterial({ color: 0xb8e6e6 });
-  for (const [dx, m] of [[-4.5, m1], [4.5, m2]]) {
-    const s = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 8), m); s.position.set(TEE.x + dx, TEE.h + 0.1, TEE.z - 1.5); s.castShadow = true; g.add(s);
-  }
+  const mats = [new THREE.MeshLambertMaterial({ color: 0x1d4f8c }), new THREE.MeshLambertMaterial({ color: 0x1d4f8c })];
+  const stem = new THREE.CylinderGeometry(0.02, 0.02, 0.04, 6), cap = new THREE.SphereGeometry(0.1, 18, 12);
+  [[-4.2, 0], [4.2, 1]].forEach(([dx, mi]) => {
+    const y = TEE.h; const s = new THREE.Mesh(stem, mats[mi]); s.position.set(TEE.x + dx, y + 0.06, TEE.z - 1.5);
+    const c = new THREE.Mesh(cap, mats[mi]); c.position.set(TEE.x + dx, y + 0.1, TEE.z - 1.5);
+    s.castShadow = c.castShadow = true; g.add(s, c);
+  });
+  // tee sign
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256; const x = cv.getContext('2d');
+  x.fillStyle = '#28283F'; x.fillRect(0, 0, 512, 256); x.strokeStyle = '#B8E6E6'; x.lineWidth = 10; x.strokeRect(14, 14, 484, 228);
+  x.fillStyle = '#B8E6E6'; x.font = '800 132px system-ui, sans-serif'; x.textBaseline = 'middle'; x.fillText('1', 44, 132);
+  x.fillStyle = '#ffffff'; x.font = '700 54px system-ui, sans-serif'; x.fillText('Morro Rock', 150, 100);
+  x.fillStyle = '#E1F5F3'; x.font = '500 40px system-ui, sans-serif'; x.fillText('Par 4 · 380 yd', 152, 170);
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  const wood = new THREE.MeshLambertMaterial({ color: 0x5a4030 });
+  const sx = TEE.x - 8.6, sz = TEE.z + 3.2, sy = heightAt(sx, sz);
+  const post1 = new THREE.Mesh(new THREE.BoxGeometry(0.09, 1.1, 0.09), wood); post1.position.set(sx - 0.42, sy + 0.55, sz);
+  const post2 = post1.clone(); post2.position.x = sx + 0.42;
+  const board = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.55, 0.05), [wood, wood, wood, wood, new THREE.MeshLambertMaterial({ map: tex }), wood]);
+  board.position.set(sx, sy + 0.95, sz + 0.05);
+  const sign = new THREE.Group(); sign.add(post1, post2, board); sign.rotation.y = 0.5; sign.traverse((o) => { o.castShadow = true; });
+  g.add(sign);
   return g;
+}
+export function createTeePeg() {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(1, 0.35, 2.6, 10), new THREE.MeshLambertMaterial({ color: 0xffffff }));
+  m.geometry.translate(0, -1.3, 0); m.castShadow = true; return m;
 }
 export function createBall() {
   const m = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, emissive: 0x334044, emissiveIntensity: 0.25 }));

@@ -1,3 +1,4 @@
+import { HEADING } from './course.js';
 // Live conditions for Morro Bay from Open-Meteo (free, no key). Falls back to typical coastal conditions.
 const URL = 'https://api.open-meteo.com/v1/forecast?latitude=35.37&longitude=-120.85' +
   '&current=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,cloud_cover,visibility,weather_code,is_day' +
@@ -30,7 +31,7 @@ export async function getWeather(params) {
   const fogCodes = w.code === 45 || w.code === 48;
   w.fogFactor = Math.max(fogCodes ? 0.75 : 0, Math.min(1, Math.max(0, (6000 - w.visibility) / 5500)));
   // wind vector in world space (x east, z south): wind blows *toward* windFrom + 180
-  const to = (w.windFrom + 180) * Math.PI / 180, ms = w.windMph * 0.44704;
+  const to = (w.windFrom + 180 - HEADING) * Math.PI / 180, ms = w.windMph * 0.44704;
   w.wind = { x: Math.sin(to) * ms, z: -Math.cos(to) * ms };
   w.label = `${Math.round(w.windMph)} mph ${compass(w.windFrom)}`;
   return w;
