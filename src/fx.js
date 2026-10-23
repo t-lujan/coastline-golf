@@ -98,7 +98,7 @@ export class Particles {
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 export function puff(ps, at, surf, strength = 1) {
-  const sand = surf === 'sand', water = surf === 'water';
+  const sand = surf === 'sand' || surf === 'waste', water = surf === 'water';
   const base = water ? [0.85, 0.95, 0.97] : sand ? [0.92, 0.85, 0.66] : [0.42, 0.6, 0.27];
   const n = Math.round((water ? 40 : sand ? 34 : 18) * strength);
   for (let i = 0; i < n; i++) {

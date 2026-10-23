@@ -43,7 +43,7 @@
   <div id="flytitle" hidden>
     <p class="eyebrow">Hole 1</p>
     <h2>Morro Rock</h2>
-    <p>Par 4 · 380 yd · carry the inlet</p>
+    <p id="fly-sub">Par 4 · 379 yd · carry the inlet</p>
     <span class="skip">Tap to skip</span>
   </div>
 
@@ -56,7 +56,7 @@
           <span id="wx-text">Morro Bay</span><span id="wx-live" class="live">Live</span>
         </div>
         <div class="chip sub-chip"><span id="time-text"></span></div>
-        <div class="chip sub-chip"><span>Hole 1 · Morro Rock · Par 4 · 380 yd</span></div>
+        <div class="chip sub-chip"><span id="hole-text">Hole 1 · Morro Rock · Par 4 · 379 yd</span></div>
       </div>
       <div class="buttons">
         <button id="btn-sound" class="icon" aria-label="Sound on" aria-pressed="true">
@@ -78,9 +78,10 @@
         <div><span class="k">Lie</span><b id="lie">Tee box</b></div>
       </div>
       <div id="clubs" class="seg chip" role="group" aria-label="Club">
-        <button data-club="driver" aria-pressed="true">Driver</button>
-        <button data-club="iron" aria-pressed="false">Iron</button>
-        <button data-club="putter" aria-pressed="false">Putter</button>
+        <button type="button" data-club="driver" aria-pressed="true" title="Driver · up to ~275 yd">Driver</button>
+        <button type="button" data-club="iron" aria-pressed="false" title="Iron · up to ~150 yd carry">Iron</button>
+        <button type="button" data-club="wedge" aria-pressed="false" title="Wedge · up to ~100 yd carry, stops fast, best from sand">Wedge</button>
+        <button type="button" data-club="putter" aria-pressed="false" title="Putter">Putter</button>
       </div>
     </div>
   </div>

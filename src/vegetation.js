@@ -3,7 +3,7 @@
 // coast live oak, a few windswept cypress). Sway lives in the vertex shader.
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import { heightAt, surfaceAt, fairwayDist, greenDist, bunkerDist, sandiness, teeDist, inland, fbm, FAIRWAY_HALF, HEADING, ROCK, BOUNDS, TEE, GREEN } from './course.js';
+import { heightAt, surfaceAt, fairwayDist, greenDist, bunkerDist, wasteDist, sandiness, duneSand, teeDist, inland, fbm, FAIRWAY_HALF, HEADING, ROCK, BOUNDS, TEE, GREEN } from './course.js';
 import { fbm3, rimUniforms, tameUniforms, GLSL_RIM_DECL, GLSL_RIM, GLSL_NOISE } from './noise.js';
 
 export const windUniforms = { uTime: { value: 0 }, uWind: { value: new THREE.Vector2(1, 0) }, uGust: { value: 0.5 } };
@@ -116,7 +116,7 @@ export function createGrass(count, fringe = 0) {
   scatter(mesh, count + fringe, rand, (R, p, q, s, c) => {
     if (placed < fringe) {
       const a = R() * 6.28, gd = 1.7 + Math.pow(R(), 1.6) * 16, x = GREEN.x + Math.cos(a) * (GREEN.rx + gd), z = GREEN.z + Math.sin(a) * (GREEN.rz + gd);
-      const surf = surfaceAt(x, z); if (surf === 'water' || surf === 'green' || surf === 'sand' && sandiness(x, z) < 0.45) return null;
+      const surf = surfaceAt(x, z); if (surf === 'water' || surf === 'green' || (surf === 'sand' || surf === 'waste') && sandiness(x, z) < 0.45) return null;
       if (fairwayDist(x, z) - FAIRWAY_HALF < 1 || bunkerDist(x, z) < 1.2 || inland(x, z) < 12) return null;
       const dune = sandiness(x, z) > 0.45 || gd > 6 && fbm(x * 0.09 + 31, z * 0.09 - 7) > 0.55;
       if (dune && R() < 0.35) return null;
@@ -133,7 +133,7 @@ export function createGrass(count, fringe = 0) {
       if (patch < 0.5 || R() > (patch - 0.5) * 3.2) return null;
       if (gd < 40 && R() > 0.25 + gd / 60) return null;
     }
-    if (!dune && surf === 'sand') return null;
+    if (!dune && (surf === 'sand' || surf === 'waste')) return null;
     if (R() > Math.max(0.1, 1 - np / 55)) return null;
     return tuft(R, x, z, p, q, s, c, dune);
   });
@@ -474,8 +474,8 @@ function treeSpots() {
     if (nearPlay(x, z) < clear) return false;
     const d = inland(x, z);
     if (kind === 'cyp') return d > 16 && d < 40;
-    if (kind === 'oak') return d > 20 && sandiness(x, z) < 0.65;
-    return d > 28 && sandiness(x, z) < 0.5;
+    if (kind === 'oak') return d > 20 && duneSand(x, z) < 0.65;
+    return d > 28 && duneSand(x, z) < 0.5;
   };
   const clearOf = (x, z, kind, minD) => !spots.some((s) => Math.hypot(s.x - x, s.z - z) < minD * (s.kind === 'oak' || kind === 'oak' ? 1.5 : 1));
   for (const h of HEROES) spots.push({ kind: h.kind, x: h.desk.x, z: h.desk.z, sc: h.sc, pri: 0, hero: h });
@@ -515,7 +515,8 @@ function treeSpots() {
   grove('cyp', -52, -70, 1, 30, { minD: 20, clear: 9, sc: [0.95, 1.2], pri: 1 });
   grove('cyp', -60, 160, 1, 30, { minD: 20, clear: 9, sc: [0.95, 1.2], pri: 1 });
   grove('cyp', 40, -170, 1, 26, { minD: 20, clear: 9, sc: [0.85, 1.0], pri: 2 });
-  return spots;
+  // nothing grows in a bunker or the waste area (filtered afterwards so the groves keep their layout)
+  return spots.filter((t) => bunkerDist(t.x, t.z) > 3 && wasteDist(t.x, t.z) > 2);
 }
 
 // soft contact shadow under each crown (one instanced draw): darkens the grass where the canopy blocks the sky

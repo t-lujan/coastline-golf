@@ -54,8 +54,8 @@ export class Audio {
   }
   thud(surf, speed) {
     if (!this.ctx) return; const ctx = this.ctx, t = ctx.currentTime, v = Math.min(1, speed / 15);
-    const n = this.src(this.white), lp = ctx.createBiquadFilter(), g = ctx.createGain(); lp.type = 'lowpass'; lp.frequency.value = surf === 'sand' ? 900 : 500;
-    g.gain.setValueAtTime(0.4 * v, t); g.gain.exponentialRampToValueAtTime(0.001, t + (surf === 'sand' ? 0.25 : 0.12)); n.connect(lp).connect(g).connect(this.master); n.start(t); n.stop(t + 0.3);
+    const n = this.src(this.white), lp = ctx.createBiquadFilter(), g = ctx.createGain(); lp.type = 'lowpass'; lp.frequency.value = (surf === 'sand' || surf === 'waste') ? 900 : 500;
+    g.gain.setValueAtTime(0.4 * v, t); g.gain.exponentialRampToValueAtTime(0.001, t + ((surf === 'sand' || surf === 'waste') ? 0.25 : 0.12)); n.connect(lp).connect(g).connect(this.master); n.start(t); n.stop(t + 0.3);
   }
   splash() {
     if (!this.ctx) return; const ctx = this.ctx, t = ctx.currentTime;

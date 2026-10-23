@@ -1,22 +1,32 @@
 // Ball flight + ground model. Units: metres, seconds.
-import { heightAt, normalAt, surfaceAt, CUP } from './course.js';
+import { heightAt, normalAt, surfaceAt, greenDist, CUP } from './course.js';
 
 export const BALL_R = 0.0214;
+// check: how much of the ball's along-ground speed survives the first bounces (backspin bites); bite: extra
+// rolling friction (m/s^2) while that spin wears off over the first second on the ground
 export const CLUBS = {
-  driver: { name: 'Driver', vmax: 76, launch: 12.5, lift: 0.0024, spinDecay: 7 },
-  iron:   { name: 'Iron',   vmax: 49, launch: 23,   lift: 0.0026, spinDecay: 5 },
-  putter: { name: 'Putter', vmax: 11, launch: 0,    lift: 0,      spinDecay: 1 },
+  driver: { name: 'Driver', vmax: 76, launch: 12.5, lift: 0.0024, spinDecay: 7, check: 1, bite: 0 },
+  iron:   { name: 'Iron',   vmax: 49, launch: 23,   lift: 0.0026, spinDecay: 5, check: 1, bite: 0 },
+  wedge:  { name: 'Wedge',  vmax: 35, launch: 33,   lift: 0.0030, spinDecay: 4, check: 0.4, bite: 2.2 },
+  putter: { name: 'Putter', vmax: 6.5, launch: 0,    lift: 0,      spinDecay: 1, check: 1, bite: 0 },
 };
 export const SURF = {
   fairway: { e: 0.32, keep: 0.72, roll: 1.25, label: 'Fairway' },
   tee:     { e: 0.30, keep: 0.70, roll: 1.25, label: 'Tee box' },
   rough:   { e: 0.18, keep: 0.48, roll: 3.4,  label: 'Rough' },
-  sand:    { e: 0.04, keep: 0.14, roll: 7.5,  label: 'Sand' },
-  green:   { e: 0.22, keep: 0.66, roll: 0.62, label: 'Green' },
+  sand:    { e: 0.04, keep: 0.14, roll: 7.5,  label: 'Bunker' },
+  waste:   { e: 0.12, keep: 0.4,  roll: 4.6,  label: 'Waste sand' },
+  green:   { e: 0.13, keep: 0.4,  roll: 0.85, label: 'Green' },
   water:   { e: 0, keep: 0, roll: 99, label: 'Water' },
 };
 const G = 9.81, DRAG = 0.0048;
-const LIE_PENALTY = { tee: 1, fairway: 1, green: 1, rough: 0.86, sand: 0.62 };
+// the collar and first cut around the green drag noticeably more than the putting surface
+const COLLAR = 3.5, COLLAR_ROLL = 1.9;
+const rollFriction = (surf, x, z) => (surf === 'fairway' || surf === 'rough') && greenDist(x, z) < COLLAR ? Math.max(SURF[surf].roll, COLLAR_ROLL) : SURF[surf].roll;
+// share of full speed you get out of each lie; the wedge's wide sole splashes out of sand and cuts through rough
+const LIE_PENALTY = { tee: 1, fairway: 1, green: 1, rough: 0.86, waste: 0.8, sand: 0.62 };
+const WEDGE_LIE = { tee: 1, fairway: 1, green: 1, rough: 0.94, waste: 0.95, sand: 0.9 };
+export const liePenalty = (club, lie) => (club === 'putter' ? 1 : ((club === 'wedge' ? WEDGE_LIE : LIE_PENALTY)[lie] ?? 1));
 
 export class Ball {
   constructor() { this.p = { x: 0, y: 0, z: 0 }; this.v = { x: 0, y: 0, z: 0 }; this.state = 'rest'; this.events = []; }
@@ -24,12 +34,12 @@ export class Ball {
   // yaw: radians, 0 = north (-z), positive turns east (+x)
   strike(clubKey, power, yaw, wind) {
     const c = CLUBS[clubKey]; this.club = c; this.wind = wind; this.t = 0; this.start = { ...this.p };
-    const lp = clubKey === 'putter' ? 1 : (LIE_PENALTY[this.lie] ?? 1);
+    const lp = liePenalty(clubKey, this.lie);
     const speed = c.vmax * (clubKey === 'putter' ? Math.pow(power, 1.6) : power) * lp;
     const la = c.launch * Math.PI / 180, dx = Math.sin(yaw), dz = -Math.cos(yaw);
     this.v = { x: dx * Math.cos(la) * speed, y: Math.sin(la) * speed, z: dz * Math.cos(la) * speed };
     this.state = clubKey === 'putter' ? 'roll' : 'flight';
-    this.lastDry = { ...this.p }; this.dryT = 0; this.maxH = this.p.y; this.carry = null; this.events = [];
+    this.lastDry = { ...this.p }; this.dryT = 0; this.maxH = this.p.y; this.carry = null; this.events = []; this.bounces = 0; this.rollT = 0;
   }
   ground() { return heightAt(this.p.x, this.p.z) + BALL_R; }
   step(dt) {
@@ -59,7 +69,9 @@ export class Ball {
       const gn = -G * n.y; let ax = -(0 - n.x * gn), az = -(0 - n.z * gn);
       ax = n.x * n.y * G; az = n.z * n.y * G;
       const sp = Math.hypot(v.x, v.z);
-      const fr = S.roll;
+      // backspin keeps biting for a moment after the ball lands (wedges stop quickly)
+      this.rollT += dt;
+      const fr = rollFriction(surf, p.x, p.z) + (surf === 'water' ? 0 : this.club.bite * Math.exp(-this.rollT / 0.5));
       if (sp > 1e-4) { ax -= fr * v.x / sp; az -= fr * v.z / sp; }
       const nvx = v.x + ax * dt, nvz = v.z + az * dt;
       // friction can't reverse motion
@@ -80,15 +92,17 @@ export class Ball {
     const dc = Math.hypot(p.x - CUP.x, p.z - CUP.z);
     if (dc < 0.16 && Math.hypot(v.x, v.y, v.z) < 9) { this.hole(); return; }
     const S = SURF[surf], n = normalAt(p.x, p.z);
+    // spin checks the ball on its first two bounces (on soft sand it plugs anyway)
+    const chk = this.bounces < 2 ? this.club.check : 1; this.bounces++;
     const vn = v.x * n.x + v.y * n.y + v.z * n.z;
     const tx = v.x - n.x * vn, ty = v.y - n.y * vn, tz = v.z - n.z * vn;
     p.y = gy;
     this.events.push({ type: 'impact', surf, speed: -vn, at: { ...p } });
     if (-vn > 1.6 && surf !== 'sand') {
-      v.x = tx * S.keep - n.x * vn * S.e; v.y = ty * S.keep - n.y * vn * S.e; v.z = tz * S.keep - n.z * vn * S.e;
+      v.x = tx * S.keep * chk - n.x * vn * S.e; v.y = ty * S.keep * chk - n.y * vn * S.e; v.z = tz * S.keep * chk - n.z * vn * S.e;
       p.y += 0.002;
     } else {
-      const keep = surf === 'sand' ? 0.12 : S.keep;
+      const keep = surf === 'sand' ? 0.12 : S.keep * chk;
       v.x = tx * keep; v.z = tz * keep; v.y = 0; this.state = 'roll';
     }
   }

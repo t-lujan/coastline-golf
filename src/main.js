@@ -1,6 +1,6 @@
 // Coastline Golf · Hole 1 · Morro Rock
 import * as THREE from 'three';
-import { TEE, CUP, GREEN, PAR, ROCK, STACKS, BOUNDS, HEADING, heightAt, surfaceAt } from './course.js';
+import { TEE, CUP, GREEN, PAR, HOLE_M, HOLE_YD, ROCK, STACKS, BOUNDS, HEADING, heightAt, surfaceAt, greenDist } from './course.js';
 import { sunPosition, sceneDate, laClock, lookFor } from './sun.js';
 import { getWeather, compass } from './weather.js';
 import { createSky } from './sky.js';
@@ -139,6 +139,9 @@ async function build() {
   post.render();
   await loadStep('Ready', 1);
 }
+// par and yardage come from the course itself (centre-line length, tee -> dogleg corner -> cup)
+$('hole-text').textContent = `Hole 1 · Morro Rock · Par ${PAR} · ${HOLE_YD} yd`;
+$('fly-sub').textContent = `Par ${PAR} · ${HOLE_YD} yd · carry the inlet`;
 
 // ---------- light, sky, fog from real time + weather ----------
 const sunDir = new V3(), moonDir = new V3(), tmpC = new THREE.Color();
@@ -254,7 +257,10 @@ const yawTo = (x, z) => Math.atan2(x - ball.p.x, -(z - ball.p.z));
 
 function autoClub() {
   if (ball.lie === 'green') return 'putter';
-  return distToCup() > 165 ? 'driver' : 'iron';
+  const d = distToCup() * YD;
+  // the wedge inside ~100 yd, and out of a bunker anywhere it can reach the green from
+  if (d <= 100 || ball.lie === 'sand' && d <= 110) return 'wedge';
+  return d > 180 && ball.lie !== 'sand' ? 'driver' : 'iron';
 }
 function setClub(c, manual = false) {
   G.club = c; G.manualClub = manual;
@@ -262,13 +268,15 @@ function setClub(c, manual = false) {
 }
 function aimPose(club = G.club, yaw = G.yaw) {
   const putt = club === 'putter', p = ball.p;
-  const dist = putt ? 3.4 : club === 'iron' ? 7 : 8.5, h = putt ? 1.2 : club === 'iron' ? 2.3 : 2.7;
+  const dist = putt ? 3.4 : club === 'wedge' ? 6 : club === 'iron' ? 7 : 8.5, h = putt ? 1.2 : club === 'wedge' ? 2.1 : club === 'iron' ? 2.3 : 2.7;
+  // off the (elevated) tee the camera stands back and a little higher, tipped down so the landing zone and its bunkers read
+  const onTee = ball.lie === 'tee' && !putt, back = dist + (onTee ? 2.5 : 0);
   const dx = Math.sin(yaw), dz = -Math.cos(yaw);
-  const cx = p.x - dx * dist, cz = p.z - dz * dist;
-  const pos = new V3(cx, Math.max(p.y, heightAt(cx, cz) + 0.6, 0.6) + h, cz);
+  const cx = p.x - dx * back, cz = p.z - dz * back;
+  const pos = new V3(cx, Math.max(p.y, heightAt(cx, cz) + 0.6, 0.6) + h + (onTee ? 1.2 : 0), cz);
   const ahead = putt ? Math.max(2.5, Math.min(7, distToCup())) : Math.min(130, Math.max(60, distToCup() * 0.6));
   const lx = p.x + dx * ahead, lz = p.z + dz * ahead;
-  const lk = new V3(lx, putt ? heightAt(lx, lz) : Math.max(p.y, heightAt(lx, lz)) + 2.2 + ahead * 0.012, lz);
+  const lk = new V3(lx, putt ? heightAt(lx, lz) : Math.max(onTee ? 0 : p.y, heightAt(lx, lz)) + 2.2 + ahead * 0.012, lz);
   return { pos, look: lk };
 }
 function tweenTo(pose, dur) { cam.from = { pos: camera.position.clone(), look: cam.look.clone() }; cam.to = pose; cam.tt = 0; cam.dur = dur; }
@@ -305,7 +313,7 @@ function shoot(club, power, yaw) {
   ball.lipped = false;
   ball.strike(club, power, yaw, weather.wind);
   audio.thwack(club, power);
-  if (club !== 'putter') puff(W0.parts, ball.p, ball.lie === 'sand' ? 'sand' : 'grass', ball.lie === 'sand' ? 1.2 : 0.5);
+  if (club !== 'putter') { const sandy = ball.lie === 'sand' || ball.lie === 'waste'; puff(W0.parts, ball.p, sandy ? 'sand' : 'grass', ball.lie === 'sand' ? 1.2 : sandy ? 0.8 : 0.5); }
   W0.tracer.clear(); W0.tracer.push(ball.p);
   W0.aimLine.set([]); W0.marker.visible = false; $('power').hidden = true;
   cam.dir.set(Math.sin(yaw), -Math.cos(yaw));
@@ -369,12 +377,11 @@ function showEnd() {
   $('banner').hidden = true;
   $('end-name').textContent = G.strokes === 1 ? 'Hole in one' : (SCORE_NAMES[rel] ?? relText(rel));
   $('end-score').textContent = relText(rel);
-  $('end-detail').textContent = `${G.strokes} stroke${G.strokes === 1 ? '' : 's'} on a par ${PAR} · ${yd(holeLength)} yd`;
+  $('end-detail').textContent = `${G.strokes} stroke${G.strokes === 1 ? '' : 's'} on a par ${PAR} · ${HOLE_YD} yd`;
   $('end-stats').innerHTML = `<div><b>${G.longest ? yd(G.longest) : '–'}</b><span>Longest drive (yd)</span></div><div><b>${G.putts}</b><span>Putts</span></div><div><b>${G.penalties}</b><span>Penalties</span></div>`;
   $('end-cond').textContent = `${weather.label} wind · ${Math.round(weather.tempF)}°F · ${$('time-text').textContent}`;
   $('endcard').hidden = false;
 }
-const holeLength = Math.hypot(TEE.x - CUP.x, TEE.z - CUP.z);
 
 function shareText() {
   const rel = G.strokes - PAR, s = rel === 0 ? 'even par' : relText(rel);
@@ -389,17 +396,51 @@ async function share() {
 }
 
 // ---------- flyover ----------
-// a cinematic reveal: low over the bay toward the rock, across the shallows to the flag, then a long
-// rising pull-back down the fairway that lands exactly on the tee camera
-const fly = { pos: null, look: null, dur: 7.6, t: 0 };
+// a cinematic reveal: in over the bay past the Rock, a slow arc around the green with the flag held in frame, then a
+// rising pull-back down the fairway that lands exactly on the tee camera. Position and look target are keyed to the
+// same times and run through clamped cubic splines in time (C2: no jumps in velocity or acceleration, still at both
+// ends), so the view never whips around or wobbles, whatever the frame rate.
+const fly = { path: null, dur: 0, t: 0, endT: -1e9 };
+// clamped cubic spline through (ts[i], ys[i]) with zero end velocity: the second derivatives at the knots
+function splineM(ts, ys) {
+  const n = ts.length, h = [], a = new Float64Array(n), b = new Float64Array(n), c = new Float64Array(n), d = new Float64Array(n);
+  for (let i = 0; i < n - 1; i++) h.push(ts[i + 1] - ts[i]);
+  b[0] = 2 * h[0]; c[0] = h[0]; d[0] = 6 * (ys[1] - ys[0]) / h[0];
+  a[n - 1] = h[n - 2]; b[n - 1] = 2 * h[n - 2]; d[n - 1] = -6 * (ys[n - 1] - ys[n - 2]) / h[n - 2];
+  for (let i = 1; i < n - 1; i++) { a[i] = h[i - 1]; b[i] = 2 * (h[i - 1] + h[i]); c[i] = h[i]; d[i] = 6 * ((ys[i + 1] - ys[i]) / h[i] - (ys[i] - ys[i - 1]) / h[i - 1]); }
+  for (let i = 1; i < n; i++) { const w = a[i] / b[i - 1]; b[i] -= w * c[i - 1]; d[i] -= w * d[i - 1]; }   // Thomas algorithm
+  const M = new Float64Array(n); M[n - 1] = d[n - 1] / b[n - 1];
+  for (let i = n - 2; i >= 0; i--) M[i] = (d[i] - c[i] * M[i + 1]) / b[i];
+  return M;
+}
+// keys: [t, x, y, z, lookX, lookY, lookZ]
+function keyPath(keys) {
+  const ts = keys.map((k) => k[0]), ch = [];
+  for (let j = 1; j < 7; j++) { const ys = keys.map((k) => k[j]); ch.push([ys, splineM(ts, ys)]); }
+  return (t, pos, look) => {
+    t = Math.max(ts[0], Math.min(ts[ts.length - 1], t));
+    let i = 0; while (i < ts.length - 2 && t > ts[i + 1]) i++;
+    const h = ts[i + 1] - ts[i], A = (ts[i + 1] - t) / h, B = 1 - A, ca = (A * A * A - A) * h * h / 6, cb = (B * B * B - B) * h * h / 6;
+    const v = ch.map(([ys, M]) => A * ys[i] + B * ys[i + 1] + ca * M[i] + cb * M[i + 1]);
+    pos.set(v[0], v[1], v[2]); look.set(v[3], v[4], v[5]);
+  };
+}
 function buildFlyover() {
   G.yaw = yawTo(CUP.x, CUP.z);
-  const end = aimPose('driver', G.yaw);
-  const c = cupPos();
-  fly.pos = new THREE.CatmullRomCurve3([new V3(-360, 8, -480), new V3(-255, 16, -250), new V3(-95, 18, -168), new V3(-6, 5.5, -118),
-    new V3(14, 22, -40), new V3(26, 16, 110), end.pos], false, 'centripetal', 0.5);
-  fly.look = new THREE.CatmullRomCurve3([new V3(ROCK.x, 70, ROCK.z), new V3(ROCK.x + 10, 60, ROCK.z), new V3(c.x, 6, c.z - 40), new V3(c.x, c.y + 1.6, c.z),
-    new V3(c.x - 4, 8, c.z - 30), new V3(6, 6, -60), end.look], false, 'centripetal', 0.5);
+  const end = aimPose('driver', G.yaw), e = end.pos, l = end.look;
+  const c = cupPos(), R = ROCK, k = 0.9;   // k: overall pace (seconds per key-time unit)
+  // the heading only ever turns one way (from the Rock round to the fairway), the view tips down once onto the green
+  // and levels out once at the tee, and the camera slows to ~25 m/s while it arcs round the flag 50 m out, 10 m+ above the dunes
+  const keys = [
+    [0.0, -360, 22, -470, R.x, 68, R.z],
+    [2.4, -255, 26, -240, R.x + 30, 44, R.z + 70],   // 75 m+ clear of the Rock's western flank
+    [4.4, -90, 22, -108, c.x - 2, 3, c.z - 2],
+    [5.7, -34, 16, -110, c.x, c.y, c.z],
+    [7.1, -8, 19, -84, c.x + 1, c.y + 1, c.z - 6],
+    [8.8, 15, 32, 62, 8, 4, -96],
+    [10.6, e.x, e.y, e.z, l.x, l.y, l.z],
+  ].map(([t, ...r]) => [t * k, ...r]);
+  fly.path = keyPath(keys); fly.dur = keys[keys.length - 1][0];
 }
 function startFlyover() {
   buildFlyover();
@@ -407,6 +448,8 @@ function startFlyover() {
   $('flytitle').hidden = false; $('flytitle').classList.add('show');
 }
 function endFlyover(quick) {
+  fly.endT = performance.now();
+  perf.frames = 0; perf.t0 = fly.endT;   // auto quality starts judging the frame rate only now (see trackPerf)
   $('flytitle').hidden = true;
   G.yaw = yawTo(CUP.x, CUP.z); setClub(autoClub());
   tweenTo(aimPose(), quick ? 0.9 : 1.4);
@@ -467,7 +510,7 @@ function updateAim() {
     if (now - aimCache > 40 || !G.lastPred) { aimCache = now; G.lastPred = predict(ball.p, ball.lie, G.club, s.power, s.yaw, { x: 0, z: 0 }); }
     const cp = G.lastPred.carryPt || G.lastPred.end; len = Math.hypot(cp.x - ball.p.x, cp.z - ball.p.z);
     land = { x: ball.p.x + Math.sin(s.yaw) * len, z: ball.p.z - Math.cos(s.yaw) * len };
-    $('power-label').textContent = `${Math.round(s.power * 100)}% · carry ${yd(len)} yd`;
+    $('power-label').textContent = `${CLUBS[G.club].name} · ${Math.round(s.power * 100)}% · carry ${yd(len)} yd`;
   }
   W0.aimLine.set(groundLine(ball.p, s.yaw, len, G.club === 'putter' ? 0.25 : Math.max(0.5, len / 150)));
   W0.marker.visible = true; W0.marker.position.set(land.x, Math.max(0.05, heightAt(land.x, land.z)) + 0.08, land.z);
@@ -476,7 +519,7 @@ for (const b of document.querySelectorAll('#clubs button')) b.addEventListener('
 window.addEventListener('keydown', (e) => {
   if (G.state === 'aim' && !cam.to) {
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { G.yaw += (e.key === 'ArrowLeft' ? -1 : 1) * (G.club === 'putter' ? 0.01 : 0.02); tweenTo(aimPose(), 0.12); }
-    if (e.key === '1') setClub('driver', true); if (e.key === '2') setClub('iron', true); if (e.key === '3') setClub('putter', true);
+    const k = { 1: 'driver', 2: 'iron', 3: 'wedge', 4: 'putter' }[e.key]; if (k) { setClub(k, true); tweenTo(aimPose(), 0.6); }
   }
   if (e.key === 'Escape') { $('info').hidden = true; }
 });
@@ -512,7 +555,8 @@ function trackPerf(now) {
   const el = now - perf.t0;
   if (el >= 2500) {
     perf.fps = perf.frames * 1000 / el; perf.history.push(Math.round(perf.fps)); perf.frames = 0; perf.t0 = now;
-    if (qMode === 'auto' && !document.hidden && ['aim', 'flight', 'flyover', 'settle'].includes(G.state) && !perf.locked) {
+    // never during the intro: a tier change resizes the canvas and rebuilds the post chain and trees, a visible hitch
+    if (qMode === 'auto' && !document.hidden && ['aim', 'flight', 'settle'].includes(G.state) && !perf.locked) {
       if (perf.fps < 48 && qLevel !== 'low') { setQuality(qLevel === 'high' ? 'med' : 'low'); perf.frames = 0; perf.t0 = performance.now(); }
       else if (perf.fps > 57) perf.locked = true;   // settled
     }
@@ -520,7 +564,11 @@ function trackPerf(now) {
 }
 
 // ---------- frame loop ----------
-const tmp = new V3(), pinV = new V3();
+function logIntro(now, rdt) {
+  const L = window.__golf.introLog, p = camera.position, d = camera.getWorldDirection(new V3());
+  if (L.length < 5000) L.push({ now, rdt, t: fly.t, s: G.state, p: [p.x, p.y, p.z], d: [d.x, d.y, d.z], fov: camera.fov, q: qLevel, dpr: renderer.getPixelRatio(), w: W, h: H });
+}
+const tmp = new V3(), pinV = new V3(), shU = new V3(), shV = new V3(), UP = new V3(0, 1, 0);
 const ray = new THREE.Raycaster(), DOWN = new V3(0, -1, 0);
 let restKey = '', restOff = 0;
 function meshOffset() {
@@ -549,6 +597,7 @@ function frame(now) {
   const rdt = Math.min(0.05, (now - last) / 1000); last = now;
   if (G.state !== 'loading') trackPerf(now);
   const a = performance.now(); update(rdt); const b = performance.now(); renderer.info.reset(); post.render(); const c = performance.now();
+  if (TEST && (G.state === 'flyover' || now - fly.endT < 1600)) logIntro(now, rdt);
   perf.upd = perf.upd * 0.95 + (b - a) * 0.05; perf.ren = perf.ren * 0.95 + (c - b) * 0.05;
 }
 function update(rdt) {
@@ -577,7 +626,7 @@ function update(rdt) {
     // cup-drop slow motion: peek ahead once the ball is rolling close to the hole
     if (ball.state === 'roll' && !G.cupCheck && distToCup() < 3.2) {
       G.cupCheck = true;
-      const b = new Ball(); b.p = { ...ball.p }; b.v = { ...ball.v }; b.state = 'roll'; b.club = ball.club; b.wind = ball.wind; b.t = ball.t; b.lipped = true;
+      const b = new Ball(); b.p = { ...ball.p }; b.v = { ...ball.v }; b.state = 'roll'; b.club = ball.club; b.wind = ball.wind; b.t = ball.t; b.rollT = ball.rollT; b.bounces = ball.bounces; b.lipped = true;
       for (let i = 0; i < 960 && b.state === 'roll'; i++) b.step(1 / 240);
       if (b.state === 'holed') { G.slowmo = true; G.timeScale = 0.38; }
     }
@@ -630,8 +679,13 @@ function update(rdt) {
   W0.peg.visible = onPeg; if (onPeg) { W0.peg.scale.setScalar(r * 0.42); W0.peg.position.set(ball.p.x, bm.position.y - r * 0.98, ball.p.z); }
 
   // shadow camera follows the action
-  const f = G.state === 'flyover' ? cam.look : tmp.set(ball.p.x, ball.p.y, ball.p.z);
-  sun.target.position.copy(f); sun.position.copy(f).addScaledVector(W0.lightDir, 400); sun.target.updateMatrixWorld();
+  // snapped to whole shadow-map texels across the light's view, so a moving camera doesn't make shadow edges crawl
+  const f = G.state === 'flyover' ? cam.look : tmp.set(ball.p.x, ball.p.y, ball.p.z), ld = W0.lightDir, sc = sun.shadow.camera;
+  const texel = (sc.right - sc.left) / sun.shadow.mapSize.x;
+  shU.crossVectors(UP, ld); if (shU.lengthSq() < 1e-6) shU.set(1, 0, 0); shU.normalize(); shV.crossVectors(ld, shU);
+  const su = Math.round(f.dot(shU) / texel) * texel, sv = Math.round(f.dot(shV) / texel) * texel, sd = f.dot(ld);
+  sun.target.position.copy(shU).multiplyScalar(su).addScaledVector(shV, sv).addScaledVector(ld, sd);
+  sun.position.copy(sun.target.position).addScaledVector(ld, 400); sun.target.updateMatrixWorld();
 
   W0.tracer.update(camera); W0.aimLine.update(camera, false);
   if (W0.marker.visible) W0.marker.scale.setScalar(Math.max(0.5, camera.position.distanceTo(W0.marker.position) * 0.028));
@@ -687,8 +741,7 @@ function updateCamera(rdt, dt) {
   if (cam.free) { camera.position.set(cam.free[0], cam.free[1], cam.free[2]); camera.lookAt(cam.free[3], cam.free[4], cam.free[5]); return; }
   if (G.state === 'flyover') {
     fly.t += rdt;
-    const u = ease(Math.min(1, fly.t / fly.dur));
-    camera.position.copy(fly.pos.getPointAt(u)); cam.look.copy(fly.look.getPointAt(u)); camera.lookAt(cam.look);
+    fly.path(fly.t, camera.position, cam.look); camera.lookAt(cam.look);
     if (fly.t > fly.dur) endFlyover(false);
     return;
   }
@@ -805,11 +858,38 @@ if (TEST) {
   window.__golf = {
     get state() { return G.state; }, get strokes() { return G.strokes; }, get ball() { return { ...ball.p, state: ball.state, lie: ball.lie }; },
     get fps() { return perf.fps; }, get fpsHistory() { return perf.history.slice(); }, get frameMs() { return { update: +perf.upd.toFixed(2), render: +perf.ren.toFixed(2) }; }, info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }), get quality() { return qLevel; }, get tierChanges() { return tierChanges; }, autoStart, get weather() { return weather; }, errors,
-    get yaw() { return G.yaw; }, W0, camera, renderer, scene,
+    get yaw() { return G.yaw; }, get club() { return G.club; }, W0, camera, renderer, scene,
+    hole: { par: PAR, yd: HOLE_YD, m: HOLE_M },
+    surfaceAt, autoClub: () => autoClub(),
+    // put the ball down anywhere and set up the shot (auto club) as if it had come to rest there
+    place: (x, z) => { ball.place(x, z); G.manualClub = false; prepareShot(0.2); cam.tt = cam.dur; return { lie: ball.lie, club: G.club }; },
+    // a windless shot from (x, z) with a given lie: carry / total / roll in yards
+    sim: (club, power, x, z, lie) => {
+      const b = new Ball(); b.place(x, z); if (lie) b.lie = lie; b.strike(club, power, 0, { x: 0, z: 0 });
+      for (let i = 0; i < 240 * 60 && (b.state === 'flight' || b.state === 'roll'); i++) b.step(1 / 240);
+      const tot = Math.hypot(b.p.x - x, b.p.z - z);
+      return { carry: b.carry * YD, total: tot * YD, roll: (tot - b.carry) * YD, end: surfaceAt(b.p.x, b.p.z), x: b.p.x, z: b.p.z };
+    },
+    // the green's own geometry and a ball released at (x, z) with a tiny nudge: does gravity alone carry it off?
+    green: GREEN, greenDist,
+    settle: (x, z) => {
+      const b = new Ball(); b.place(x, z); b.lie = 'green'; b.club = CLUBS.putter; b.wind = { x: 0, z: 0 }; b.t = 0; b.rollT = 0; b.v.x = 0.001; b.state = 'roll';
+      for (let i = 0; i < 240 * 30 && b.state === 'roll'; i++) b.step(1 / 240);
+      return { end: surfaceAt(b.p.x, b.p.z), moved: Math.hypot(b.p.x - x, b.p.z - z) };
+    },
     shoot: (club, power, angleDeg = 0) => { if (club) setClub(club, true); return shoot(G.club, power, G.yaw + angleDeg * Math.PI / 180); },
     freeCam: (...a) => { cam.free = a.length ? a : null; update(1 / 30); post.render(); },
     advance: (sec, step = 1 / 30) => { for (let t = 0; t < sec; t += step) update(step); post.render(); },
     flyAt: (sec) => { fly.t = sec; },
+    // the intro path sampled at n even time steps: [x, y, z, lookX, lookY, lookZ, ground height under the camera]
+    flyPath: (n = 240) => {
+      if (!fly.path) buildFlyover();
+      const p = new V3(), l = new V3(), pts = [];
+      for (let i = 0; i <= n; i++) { fly.path(fly.dur * i / n, p, l); pts.push([p.x, p.y, p.z, l.x, l.y, l.z, heightAt(p.x, p.z)]); }
+      return { dur: fly.dur, pts, cup: cupPos() };
+    },
+    // what the camera actually did, frame by frame, while the intro played (see frame())
+    introLog: [],
     skip: () => { if (G.state === 'flyover') endFlyover(true); },
     finishMove: () => { if (cam.to) { cam.tt = cam.dur; } },
     placeNearCup: (d = 0.9) => {
@@ -818,7 +898,7 @@ if (TEST) {
     },
     forceHoleOut: () => {
       window.__golf.placeNearCup(0.8);
-      setTimeout(() => { cam.to = null; G.state = 'aim'; shoot('putter', 0.30, yawTo(CUP.x, CUP.z)); }, 400);
+      setTimeout(() => { cam.to = null; G.state = 'aim'; shoot('putter', 0.42, yawTo(CUP.x, CUP.z)); }, 400);
     },
   };
 }
