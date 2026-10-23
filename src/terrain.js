@@ -126,8 +126,10 @@ export function createTerrain({ segX, segZ, paintRes, bounds = BOUNDS, paint: pa
           col = mix(col, mix(vec3(0.15, 0.38, 0.06), vec3(0.21, 0.46, 0.09), step(0.5, fract(p.x / 1.5))), tk);
           // green: collar, then a fine checkerboard sheen
           float chk = abs(step(0.5, fract(p.x / 2.5)) - step(0.5, fract(p.y / 2.5)));
-          col = mix(col, vec3(0.12, 0.33, 0.05), edgeS(P.g - 1.5, 0.2));
-          col = mix(col, mix(vec3(0.15, 0.39, 0.075), vec3(0.17, 0.42, 0.085), chk) * (0.94 + nF * 0.12), edgeS(P.g, 0.06));
+          // close up (the hole-out shot) the turf needs grain: fine mottling on the green, a coarser, darker collar
+          float grain = cgN2(p * 9.0) * 0.6 + cgN2(p * 23.0) * 0.4;
+          col = mix(col, vec3(0.11, 0.30, 0.045) * (0.88 + grain * 0.24), edgeS(P.g - 1.5, 0.2));
+          col = mix(col, mix(vec3(0.14, 0.37, 0.07), vec3(0.18, 0.44, 0.09), chk) * (0.94 + nF * 0.12) * (0.92 + grain * 0.16), edgeS(P.g, 0.06));
           // bunkers: a dark grassy lip, bright raked sand
           col = mix(col, vec3(0.06, 0.12, 0.03), edgeS(P.b - 0.45, 0.12));
           float bk = edgeS(P.b, 0.06);

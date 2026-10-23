@@ -27,7 +27,10 @@ export const GLSL_NOISE = /* glsl */`
     vec3 r1 = cross(dpy, nrm), r2 = cross(nrm, dpx);
     float det = dot(dpx, r1);
     vec3 g = sign(det) * (dhx * r1 + dhy * r2);
-    return normalize(abs(det) * nrm - g * k);
+    // degenerate pixels (no screen-space derivative) would normalize a zero vector into NaN, which bloom then smears
+    // over the whole frame: keep the unbumped normal there
+    vec3 b = abs(det) * nrm - g * k; float l = dot(b, b);
+    return l > 1e-30 ? b * inversesqrt(l) : nrm;
   }`;
 
 // uTame 0..1: how hard to pull warm low-sun light back toward natural colours (rock, foliage at golden hour)

@@ -13,7 +13,7 @@ const touch = typeof matchMedia !== 'undefined' && (matchMedia('(pointer: coarse
 export const QUALITY = {
   high: { dpr: 2, bloom: true, bloomScale: touch ? 0.5 : 1, mips: 5, aa: touch ? 'fxaa' : 'smaa', shadow: 2048, grass: 1, post: true, flowers: 1, ice: 1, rocks: 1, drift: 1, shrubs: 1,
     near: 1e4, far: 1e4, treeNear: 1e4, terrain: [300, 310, 100, 290, 120, 100], water: 160, rock: 'high', rockShadow: true },
-  med:  { dpr: touch ? 2 : 1.5, bloom: true, bloomScale: 0.5, mips: 3, aa: 'fxaa', shadow: 1024, grass: 0.55, post: true, flowers: 0.4, ice: 0.5, rocks: 0.6, drift: 1, shrubs: 0.6,
+  med:  { dpr: touch ? 2 : 1.5, bloom: true, bloomScale: 0.5, mips: 2, aa: 'fxaa', shadow: 1024, grass: 0.55, post: true, flowers: 0.4, ice: 0.5, rocks: 0.6, drift: 1, shrubs: 0.6,
     near: 55, far: 120, treeNear: 70, terrain: [170, 176, 56, 164, 80, 66], water: 64, rock: 'med', rockShadow: false },
   // low keeps the cheap grade pass (no bloom, no AA) so it still matches the look of the other tiers
   low:  { dpr: touch ? 1.5 : 1, bloom: false, aa: 'none', shadow: 512, grass: 0.35, post: true, flowers: 0, ice: 0.35, rocks: 0.4, drift: 0.5, shrubs: 0.4,
@@ -34,6 +34,7 @@ const GradeShader = {
       col += uShadowTint * (1.0 - smoothstep(0.0, 0.5, l)) + uHighTint * smoothstep(0.5, 1.0, l);
       col += uLift * (1.0 - smoothstep(0.0, 0.4, l));                            // lifted (moonlit) shadows
       vec2 d = vUv - 0.5; float v = smoothstep(0.85, 0.2, length(d * vec2(1.0, 0.85)) * 1.25); col *= mix(1.0 - uVig, 1.0, v);
+      col += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;   // dither: no banding in fog and sky gradients
       gl_FragColor = vec4(clamp(col, 0.0, 1.0), c.a); }`,
 };
 
@@ -62,6 +63,6 @@ export function createPost(renderer, scene, camera, level, w, h, dpr) {
     bloom, grade,
     render: () => { exposure.value = renderer.toneMappingExposure; composer.render(); },
     setSize: (W, H) => { composer.setSize(W, H); if (bloom) bloom.resolution.set(W * q.bloomScale, H * q.bloomScale); setRes(W, H); },
-    dispose: () => { composer.dispose(); rt.dispose(); },
+    dispose: () => { for (const p of composer.passes) p.dispose(); composer.dispose(); rt.dispose(); },   // passes own their render targets and lookup textures
   };
 }

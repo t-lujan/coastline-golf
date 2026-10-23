@@ -108,18 +108,23 @@ export function puff(ps, at, surf, strength = 1) {
       r: base[0] * rnd(0.9, 1.05), g2: base[1] * rnd(0.9, 1.05), b: base[2] * rnd(0.9, 1.05), alpha: 0.95 });
   }
 }
-// paper confetti in the course palette plus a warm accent, and a quick bloom-bright sparkle burst out of the cup
+// paper confetti in the course palette plus a warm accent, and a quick bloom-bright sparkle burst out of the cup.
+// The particles are unlit, so by moonlight (night: 0..1) the paper is dimmed and cooled to what the moon would show
+// and the sparkle is a soft glint below the bloom threshold, instead of reading as sparks or fireworks.
 const PALETTE = [[1, 1, 1], [0.722, 0.902, 0.902], [0.173, 0.416, 0.549], [1, 0.78, 0.32], [0.98, 0.45, 0.38], [0.882, 0.961, 0.953]];
-export function confetti(ps, at) {
+const MOON = [0.3, 0.34, 0.42];
+export function confetti(ps, at, night = 0) {
+  const lit = (c) => c.map((v, j) => { const l = (c[0] + c[1] + c[2]) / 3; return v * (1 - night) + (l + (v - l) * 0.5) * MOON[j] * night; });
   for (let i = 0; i < 200; i++) {
-    const a = Math.random() * Math.PI * 2, s = rnd(0.8, 4.2), c = PALETTE[(Math.random() * PALETTE.length) | 0];
+    const a = Math.random() * Math.PI * 2, s = rnd(0.8, 4.2), c = lit(PALETTE[(Math.random() * PALETTE.length) | 0]);
     ps.emit({ x: at.x + Math.cos(a) * 0.1, y: at.y + 0.15, z: at.z + Math.sin(a) * 0.1, vx: Math.cos(a) * s, vy: rnd(5.5, 10.5), vz: Math.sin(a) * s, ttl: rnd(3.2, 4.6), hold: 0.7,
       size: rnd(0.09, 0.15), drag: 2.2, g: 3.2, flutter: rnd(1.5, 3), spin: rnd(4, 11) * (Math.random() < 0.5 ? -1 : 1), ph: rnd(0, 6.28),
       r: c[0], g2: c[1], b: c[2], alpha: 1, floor: at.y + 0.02 });
   }
-  for (let i = 0; i < 46; i++) {
+  const spark = night > 0.5 ? [0.55, 0.62, 0.72] : [3.2, 2.7, 1.7];
+  for (let i = 0, n = night > 0.5 ? 14 : 46; i < n; i++) {
     const a = Math.random() * Math.PI * 2, el = rnd(0.25, 1.35), s = rnd(2.5, 6);
     ps.emit({ x: at.x, y: at.y + 0.08, z: at.z, vx: Math.cos(a) * Math.cos(el) * s, vy: Math.sin(el) * s + 1.5, vz: Math.sin(a) * Math.cos(el) * s, ttl: rnd(0.45, 0.9),
-      size: rnd(0.03, 0.06), drag: 3.5, g: 2, r: 3.2, g2: 2.7, b: 1.7, alpha: 1 });
+      size: rnd(0.03, 0.06), drag: 3.5, g: 2, r: spark[0], g2: spark[1], b: spark[2], alpha: night > 0.5 ? 0.7 : 1 });
   }
 }

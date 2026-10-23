@@ -3,7 +3,7 @@
 // coast live oak, a few windswept cypress). Sway lives in the vertex shader.
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import { heightAt, surfaceAt, fairwayDist, greenDist, sandiness, teeDist, inland, fbm, FAIRWAY_HALF, HEADING, ROCK, BOUNDS, TEE } from './course.js';
+import { heightAt, surfaceAt, fairwayDist, greenDist, bunkerDist, sandiness, teeDist, inland, fbm, FAIRWAY_HALF, HEADING, ROCK, BOUNDS, TEE, GREEN } from './course.js';
 import { fbm3, rimUniforms, tameUniforms, GLSL_RIM_DECL, GLSL_RIM, GLSL_NOISE } from './noise.js';
 
 export const windUniforms = { uTime: { value: 0 }, uWind: { value: new THREE.Vector2(1, 0) }, uGust: { value: 0.5 } };
@@ -13,7 +13,7 @@ export const leafUniforms = { uLeafGlow: { value: new THREE.Color(0, 0, 0) }, uR
 // deterministic random so the course is the same every visit
 export function rng(seed) { return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
-function swayMaterial(mat, strength, heightScale, { flatNormal = false, rim = false, foliage = false, holes = 0 } = {}) {
+function swayMaterial(mat, strength, heightScale, { flatNormal = false, rim = false, foliage = false, holes = 0, ragged = true } = {}) {
   mat.onBeforeCompile = (sh) => {
     if (rim) { Object.assign(sh.uniforms, rimUniforms); sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>\n${GLSL_RIM_DECL}`); }
     if (foliage) {
@@ -29,7 +29,7 @@ function swayMaterial(mat, strength, heightScale, { flatNormal = false, rim = fa
           diffuseColor.rgb *= mix(0.62 + furrow * 0.55, (0.72 + lf * 0.5) * (0.6 + speck * 0.75), isLeaf);
           vec3 leafTint = diffuseColor.rgb / max(diffuseColor.g, 0.002) * 0.6;`)
         .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
-          ${foliage === 'all' ? '' : `// leafy silhouettes: cut the tuft edges away with noise so crowns read as foliage, not smooth stones
+          ${foliage === 'all' || !ragged ? '' : `// leafy silhouettes: cut the tuft edges away with noise so crowns read as foliage, not smooth stones
           { float vd = length(vViewPosition), edge = 1.0 - abs(dot(normal, normalize(vViewPosition)));
             float cutN = cgN3(vFP * 3.1) * 0.55 + cgN3(vFP * 8.3) * 0.45, far = smoothstep(50.0, 180.0, vd);
             if (isLeaf > 0.5 && uRagged > 0.5) {
@@ -82,7 +82,7 @@ function scatter(mesh, count, rand, place) {
 }
 
 // ---------- grass tufts ----------
-export function createGrass(count) {
+export function createGrass(count, fringe = 0) {
   const P = [], N = [], C = [];
   for (let b = 0; b < 4; b++) {
     const a = b * 1.57 + 0.3, ca = Math.cos(a), sa = Math.sin(a), lean = 0.16 + b * 0.05, w = 0.05;
@@ -94,9 +94,34 @@ export function createGrass(count) {
   geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
-  const mesh = new THREE.InstancedMesh(geo, swayMaterial(new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }), 1.0, 1.0, { flatNormal: true }), count);
+  const mesh = new THREE.InstancedMesh(geo, swayMaterial(new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }), 1.0, 1.0, { flatNormal: true }), count + fringe);
   const rand = rng(11);
-  return scatter(mesh, count, rand, (R, p, q, s, c) => {
+  const tuft = (R, x, z, p, q, s, c, dune) => {
+    const near = dune ? Math.min(1, 0.55 + greenDist(x, z) / 70) : 1;
+    const hgt = dune ? (0.35 + R() * R() * 0.9) * near : 0.26 + R() * 0.32;
+    // a clump spreads around its centre: offset each tuft a little and lean it at its own angle
+    const jx = dune ? (R() - 0.5) * 1.6 : 0, jz = dune ? (R() - 0.5) * 1.6 : 0;
+    p.set(x + jx, heightAt(x + jx, z + jz) - 0.03, z + jz);
+    q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, R() * 6.28);
+    if (dune) { const la = R() * 6.28, lean = R() * 0.38; q.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(Math.cos(la), 0, Math.sin(la)), lean)); }
+    s.set((dune ? 0.7 + R() * 1.0 : 1 + R() * 0.7) * (dune ? 0.6 + hgt * 0.6 : 1), hgt, (dune ? 0.7 + R() * 1.0 : 1 + R() * 0.7) * (dune ? 0.6 + hgt * 0.6 : 1));
+    const k = 0.8 + R() * 0.4, dry = fbm(x * 0.02, z * 0.02) > 0.58 ? 1 : 0;
+    if (dune) { const st = R() * 0.7 + (fbm(x * 0.04 - 5, z * 0.04) - 0.4); c.setRGB(lerp(0.2, 0.37, st) * k, lerp(0.25, 0.33, st) * k, lerp(0.13, 0.15, st) * k); }
+    else if (dry) c.setRGB(0.3 * k, 0.26 * k, 0.1 * k); else c.setRGB(0.12 * k, 0.24 * k, 0.05 * k);
+    return { color: true };
+  };
+  // the first `fringe` tufts ring the green: a short, even fringe just off the collar, then fescue and dune-grass clumps
+  // on the rough and the dune behind it, so the putting surface sits in a frame instead of on bare ground
+  let placed = 0;
+  scatter(mesh, count + fringe, rand, (R, p, q, s, c) => {
+    if (placed < fringe) {
+      const a = R() * 6.28, gd = 1.7 + Math.pow(R(), 1.6) * 16, x = GREEN.x + Math.cos(a) * (GREEN.rx + gd), z = GREEN.z + Math.sin(a) * (GREEN.rz + gd);
+      const surf = surfaceAt(x, z); if (surf === 'water' || surf === 'green' || surf === 'sand' && sandiness(x, z) < 0.45) return null;
+      if (fairwayDist(x, z) - FAIRWAY_HALF < 1 || bunkerDist(x, z) < 1.2 || inland(x, z) < 12) return null;
+      const dune = sandiness(x, z) > 0.45 || gd > 6 && fbm(x * 0.09 + 31, z * 0.09 - 7) > 0.55;
+      if (dune && R() < 0.35) return null;
+      placed++; return tuft(R, x, z, p, q, s, c, dune);
+    }
     const x = -140 + R() * 280, z = -200 + R() * 450;
     const np = nearPlay(x, z); if (np < 1.2) return null;
     const surf = surfaceAt(x, z); if (surf === 'water' || surf === 'green') return null;
@@ -110,19 +135,10 @@ export function createGrass(count) {
     }
     if (!dune && surf === 'sand') return null;
     if (R() > Math.max(0.1, 1 - np / 55)) return null;
-    const near = dune ? Math.min(1, 0.55 + greenDist(x, z) / 70) : 1;
-    const hgt = dune ? (0.35 + R() * R() * 0.9) * near : 0.26 + R() * 0.32;
-    // a clump spreads around its centre: offset each tuft a little and lean it at its own angle
-    const jx = dune ? (R() - 0.5) * 1.6 : 0, jz = dune ? (R() - 0.5) * 1.6 : 0;
-    p.set(x + jx, heightAt(x + jx, z + jz) - 0.03, z + jz);
-    q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, R() * 6.28);
-    if (dune) { const la = R() * 6.28, lean = R() * 0.38; q.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(Math.cos(la), 0, Math.sin(la)), lean)); }
-    s.set((dune ? 0.7 + R() * 1.0 : 1 + R() * 0.7) * (dune ? 0.6 + hgt * 0.6 : 1), hgt, (dune ? 0.7 + R() * 1.0 : 1 + R() * 0.7) * (dune ? 0.6 + hgt * 0.6 : 1));
-    const k = 0.8 + R() * 0.4, dry = fbm(x * 0.02, z * 0.02) > 0.58 ? 1 : 0;
-    if (dune) { const st = R() * 0.7 + (fbm(x * 0.04 - 5, z * 0.04) - 0.4); c.setRGB(lerp(0.2, 0.37, st) * k, lerp(0.25, 0.33, st) * k, lerp(0.13, 0.15, st) * k); }
-    else if (dry) c.setRGB(0.3 * k, 0.26 * k, 0.1 * k); else c.setRGB(0.12 * k, 0.24 * k, 0.05 * k);
-    return { color: true };
+    return tuft(R, x, z, p, q, s, c, dune);
   });
+  mesh.userData.always = Math.min(placed, mesh.count);   // the green's fringe is kept at every density
+  return mesh;
 }
 
 // ---------- wildflowers: orange poppies, purple lupine, yellow mustard ----------
@@ -326,12 +342,48 @@ function pineGeometry(seed, { H0 = 15, spread = 1, far = false } = {}) {
   return parts;
 }
 
+// a hanging bunch of long, narrow, sickle-shaped eucalyptus leaves (3 triangles each: a tapered base quad and a
+// pointed tip) on a short drooping stalk from `top`. Normals point out of the bunch and the crown so the open canopy
+// still shades as a soft volume; the leaves are drawn double-sided without flipping them.
+function leafBunch(top, seed, { n = 7, len = 1.15, wid = 0.15, hang = 1.0, spread = 0.55, ao, cc, band } = {}) {
+  const R = rng(seed), P = [], N = [], C = [], pal = PAL.euc;
+  const v = (a, b, k) => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k], nrm = (a) => { const l = Math.hypot(...a) || 1; return a.map((x) => x / l); };
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  for (let i = 0; i < n; i++) {
+    const u = (i + R() * 0.6) / n, th = i * 2.39996 + seed + R() * 0.8, out = [Math.cos(th), 0, Math.sin(th)];
+    const base = [top[0] + out[0] * spread * 0.35 * u, top[1] - hang * u - R() * 0.15, top[2] + out[2] * spread * 0.35 * u];
+    // upper leaves splay out, lower ones hang nearly straight down; each one curls further down toward its tip
+    const L = len * (0.75 + R() * 0.5), splay = (1 - u) * 0.9 + 0.25 + R() * 0.25;
+    const d1 = nrm([out[0] * splay, -1, out[2] * splay]), d2 = nrm([out[0] * splay * 0.45, -1, out[2] * splay * 0.45]);
+    const mid = v(base, d1, L * 0.45), tip = v(mid, d2, L * 0.55);
+    let w = nrm(cross(d1, out)); const tw = (R() - 0.5) * 1.6;
+    w = nrm(v(w, out, Math.tan(tw) * 0.6));
+    const W = wid * (0.8 + R() * 0.4), b0 = v(base, w, -W * 0.18), b1 = v(base, w, W * 0.18), m0 = v(mid, w, -W * 0.5), m1 = v(mid, w, W * 0.5);
+    const pts = [b0, b1, m1, b0, m1, m0, m0, m1, tip];
+    const k = 0.85 + R() * 0.3;
+    for (let j = 0; j < 9; j++) {
+      const q = pts[j];
+      let n0 = nrm([q[0] - top[0], (q[1] - top[1]) * 0.4 + 0.2, q[2] - top[2]]);
+      if (cc) { const c = nrm([q[0] - cc[0], q[1] - cc[1], q[2] - cc[2]]); n0 = nrm(v(n0, c, cc[3])); }
+      n0 = nrm([n0[0], n0[1] + 0.3, n0[2]]);
+      const gy = band ? Math.min(1, Math.max(0, (q[1] - band[0]) / (band[1] - band[0]))) : 0.5, tipK = j === 8 ? 0.15 : 0;
+      const wt = Math.min(1, Math.max(0, 0.15 + gy * 0.65 + tipK + (R() - 0.5) * 0.25));
+      const col = wt < 0.5 ? pal.under.map((a, m) => lerp(a, pal.mid[m], wt * 2)) : pal.mid.map((a, m) => lerp(a, pal.top[m], wt * 2 - 1));
+      let a = 1; if (ao) { const dd = Math.hypot(q[0] - ao[0], (q[1] - ao[1]) * 1.3, q[2] - ao[2]) / ao[3]; a = 0.5 + 0.5 * Math.min(1, dd); }
+      P.push(...q); N.push(...n0); C.push(col[0] * a * k, col[1] * a * k, col[2] * a * k);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+  return g;
+}
+
 function eucGeometry(seed, { far = false } = {}) {
   // tall, pale and open: a forked trunk, long leaders, sparse blue-grey foliage hanging in drooping curtains
   const R = rng(seed), parts = [], H = 21 + R() * 5, fy = H * (0.36 + R() * 0.1);
   const lean = (R() - 0.5) * 1.4, lz = (R() - 0.5) * 0.6;
   bough(parts, [[0, -0.5, 0], [lean * 0.25, fy * 0.5, lz * 0.3], [lean, fy, lz]], 0.62, 0.42, eucBark, far ? 6 : 9);
-  const cc = [lean, H * 0.72, lz, 0.5], ao = [lean, H * 0.7, lz, 5.5];
+  const cc = [lean, H * 0.72, lz, 0.5], ao = [lean, H * 0.7, lz, 5.5], band = [H * 0.45, H * 1.02];
   const nl = 2 + (R() < 0.65 ? 1 : 0);
   for (let l = 0; l < nl; l++) {
     const a = l / nl * 6.28 + R() * 0.9, sp = 2.0 + R() * 2.6, top = H * (0.84 + R() * 0.16);
@@ -342,20 +394,23 @@ function eucGeometry(seed, { far = false } = {}) {
       const u = 0.3 + b / nbr * 0.65, s0 = [lerp(m[0], e[0], u * 0.6), lerp(fy, top, u), lerp(m[2], e[2], u * 0.6)], ba = a + (R() - 0.5) * 2.6, bl = 2.4 + R() * 2.6;
       const bm = [s0[0] + Math.cos(ba) * bl * 0.55, s0[1] + bl * 0.3, s0[2] + Math.sin(ba) * bl * 0.55], be = [s0[0] + Math.cos(ba) * bl, s0[1] + bl * 0.05, s0[2] + Math.sin(ba) * bl];
       bough(parts, [s0, bm, be], 0.13, 0.03, eucBark, far ? 3 : 5);
-      // foliage hangs in loose, drooping clouds toward the branch tips
-      const tip = [lerp(bm[0], be[0], 0.6), lerp(bm[1], be[1], 0.6) - 0.5, lerp(bm[2], be[2], 0.6)];
-      const nq = 8 + (R() * 3 | 0);
+      // foliage hangs in open bunches of long sickle leaves toward the branch tips: the blue-gum "curtain"
+      // (far: every third bunch, with fewer, bigger leaves, so the curtain keeps its outline at a fraction of the triangles)
+      const tip = [lerp(bm[0], be[0], 0.6), lerp(bm[1], be[1], 0.6) - 0.3, lerp(bm[2], be[2], 0.6)];
+      const nq = 6 + (R() * 3 | 0);
       for (let q = 0; q < nq; q++) {
-        // many small, faceted hanging tufts stepping down from the twig: the open eucalyptus "curtain"
-        // (far: every third one, larger, so the curtain keeps its outline at a fraction of the triangles)
-        if (far && q % 3) { R(); R(); R(); R(); continue; }
-        const qa = q * 2.3 + R(), qd = q ? 0.4 + R() * 1.1 : 0, r = (0.36 + R() * 0.26) * (far ? 1.55 : 1);
-        const c = [tip[0] + Math.cos(qa) * qd, tip[1] + 0.3 - q * 0.22 - R() * 0.5, tip[2] + Math.sin(qa) * qd];
-        parts.push(clump(c, r * 1.0, r * 1.35, r * 0.95, seed + l * 9 + b * 3 + q, PAL.euc, { detail: 0, flat: 0.75, droop: 1.5, ao, lift: 0.45, nrm: [[tip[0], tip[1] + 0.3, tip[2], 0.6], cc] }));
+        if (far && q % 3) { R(); R(); R(); continue; }
+        const qa = q * 2.3 + R(), qd = q ? 0.4 + R() * 1.3 : 0;
+        const c = [tip[0] + Math.cos(qa) * qd, tip[1] + 0.4 - q * 0.2 - R() * 0.4, tip[2] + Math.sin(qa) * qd];
+        parts.push(leafBunch(c, seed * 31 + l * 9 + b * 3 + q, far ? { n: 4, len: 1.6, wid: 0.32, hang: 1.2, spread: 0.9, ao, cc, band } : { n: 9, len: 1.15, wid: 0.19, hang: 1.0, spread: 0.65, ao, cc, band }));
       }
-      if (R() < 0.6 && !far) for (let q = 0; q < 3; q++) { const c = [lerp(s0[0], bm[0], 0.7) + (R() - 0.5) * 0.9, lerp(s0[1], bm[1], 0.7) - 0.4 - q * 0.3, lerp(s0[2], bm[2], 0.7) + (R() - 0.5) * 0.9]; parts.push(clump(c, 0.4, 0.5, 0.4, seed + l * 5 + b * 7 + q, PAL.euc, { detail: 0, flat: 0.75, droop: 1.4, ao, lift: 0.45, nrm: [cc] })); }
+      if (R() < 0.6) for (let q = 0; q < 2; q++) { const c = [lerp(s0[0], bm[0], 0.7) + (R() - 0.5) * 0.9, lerp(s0[1], bm[1], 0.7) - 0.2 - q * 0.3, lerp(s0[2], bm[2], 0.7) + (R() - 0.5) * 0.9]; if (!far) parts.push(leafBunch(c, seed * 17 + l * 5 + b * 7 + q, { n: 7, len: 1.0, wid: 0.18, hang: 0.8, spread: 0.5, ao, cc, band })); }
     }
-    for (let q = 0; q < 10; q++) { if (far && q >= 4) { R(); R(); R(); continue; } const qa = q * 2.1 + R(), qd = q ? (0.5 + R() * 1.1) * (far ? 1.4 : 1) : 0, f = far ? 1.6 : 1; parts.push(clump([e[0] + Math.cos(qa) * qd, e[1] + 0.2 - q * 0.22 - R() * 0.3, e[2] + Math.sin(qa) * qd], 0.48 * f, 0.6 * f, 0.46 * f, seed + l * 13 + 70 + q, PAL.euc, { detail: 0, flat: 0.75, droop: 1.4, ao, lift: 0.45, nrm: [[e[0], e[1] + 0.2, e[2], 0.6], cc] })); }
+    for (let q = 0; q < 8; q++) {
+      if (far && q >= 3) { R(); R(); R(); continue; }
+      const qa = q * 2.1 + R(), qd = q ? (0.5 + R() * 1.2) * (far ? 1.4 : 1) : 0;
+      parts.push(leafBunch([e[0] + Math.cos(qa) * qd, e[1] + 0.4 - q * 0.2 - R() * 0.3, e[2] + Math.sin(qa) * qd], seed * 13 + l * 13 + 70 + q, far ? { n: 5, len: 1.7, wid: 0.32, hang: 1.3, spread: 1.0, ao, cc, band } : { n: 10, len: 1.25, wid: 0.19, hang: 1.2, spread: 0.75, ao, cc, band }));
+    }
   }
   return parts;
 }
@@ -473,50 +528,72 @@ function contactShadows(n) {
   return m;
 }
 const QUALITY_PRI = { high: 9, med: 2, low: 1 };
+// full-detail variants per species on each tier: every variant is a draw call plus a shadow draw, so cheaper tiers
+// share fewer shapes (the hero trees at the tee are always variant 0, so they look the same on every tier)
+const TREE_VARIANTS = { high: { pine: 3, euc: 2, oak: 1, cyp: 1 }, med: { pine: 2, euc: 2, oak: 1, cyp: 1 }, low: { pine: 1, euc: 1, oak: 1, cyp: 1 } };
+// each species has full-detail variants for trees near the camera and one cheap far version (same silhouette,
+// faceted tufts, no hidden twigs) that never casts shadows; trees swap between them by distance
+const KINDS = {
+  pine: { geos: [() => pineGeometry(3), () => pineGeometry(17), () => pineGeometry(41, { H0: 12.5, spread: 0.85 })], far: () => pineGeometry(17, { far: true }), h: 17, sway: 0.25, shadow: 5.5, holes: 0.5 },
+  euc: { geos: [() => eucGeometry(7), () => eucGeometry(29)], far: () => eucGeometry(7, { far: true }), h: 24, sway: 0.35, shadow: 4.8, holes: 0, leaves: true },
+  oak: { geos: [() => oakGeometry(11)], far: () => oakGeometry(11, { far: true }), h: 8, sway: 0.15, shadow: 7.5, holes: 0.2 },
+  cyp: { geos: [() => cypressGeometry(13)], far: () => cypressGeometry(13, { far: true }), h: 8, sway: 0.2, shadow: 5.5, holes: 0.3 },
+};
 
-export function createTrees() {
+export function createTrees(level = 'high') {
   const R = rng(5), spots = treeSpots().sort((a, b) => a.pri - b.pri);
   // prevailing NW wind: crowns sheared toward the south-east
   const lean = (135 - HEADING) * Math.PI / 180, dx = Math.sin(lean), dz = -Math.cos(lean), down = Math.atan2(-dz, dx);
-  // each species has full-detail variants for trees near the camera and one cheap far version (same silhouette,
-  // faceted tufts, no hidden twigs) that never casts shadows; trees swap between them by distance
-  const kinds = [
-    { kind: 'pine', geos: [pineGeometry(3), pineGeometry(17), pineGeometry(41, { H0: 12.5, spread: 0.85 })], far: pineGeometry(17, { far: true }), h: 17, sway: 0.25, shadow: 5.5, holes: 0.5 },
-    { kind: 'euc', geos: [eucGeometry(7), eucGeometry(29)], far: eucGeometry(7, { far: true }), h: 24, sway: 0.35, shadow: 4.8, holes: 1 },
-    { kind: 'oak', geos: [oakGeometry(11)], far: oakGeometry(11, { far: true }), h: 8, sway: 0.15, shadow: 7.5, holes: 0.2 },
-    { kind: 'cyp', geos: [cypressGeometry(13)], far: cypressGeometry(13, { far: true }), h: 8, sway: 0.2, shadow: 5.5, holes: 0.3 },
-  ];
-  const g = new THREE.Group(), meshes = [], m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
+  const g = new THREE.Group(), meshes = [], q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
   const blobs = contactShadows(spots.length), up = new THREE.Vector3(0, 1, 0), nv = new THREE.Vector3(), qy = new THREE.Quaternion();
+  blobs.frustumCulled = false; blobs.count = 0; g.add(blobs);
   const place = (t) => {
     p.set(t.x, heightAt(t.x, t.z) - 0.25, t.z); q.setFromAxisAngle(up, t.yaw); t.matrix.compose(p, q, t.scale);
     const e = 0.6, n = nv.set(heightAt(t.x - e, t.z) - heightAt(t.x + e, t.z), 2 * e, heightAt(t.x, t.z - e) - heightAt(t.x, t.z + e)).normalize();
     q.setFromUnitVectors(up, n).multiply(qy.setFromAxisAngle(up, t.yaw));
     const r = t.sc * t.shadow; p.set(t.x, heightAt(t.x, t.z) + 0.12, t.z); s.set(r, 1, r); t.blobMatrix.compose(p, q, s);
   };
-  const add = (mesh, shadow) => { mesh.castShadow = shadow; mesh.receiveShadow = true; mesh.frustumCulled = false; mesh.count = 0; g.add(mesh); meshes.push(mesh); return mesh; };
-  for (const k of kinds) {
-    const list = spots.filter((t) => t.kind === k.kind); if (!list.length) continue;
-    const mat = swayMaterial(new THREE.MeshLambertMaterial({ vertexColors: true }), k.sway, k.h, { rim: true, foliage: true, holes: k.holes });
-    const far = add(new THREE.InstancedMesh(mergeTree(k.far), mat, list.length), false);
-    k.geos.forEach((parts, vi) => {
-      const mine = list.filter((_, i) => i % k.geos.length === vi); if (!mine.length) return;
-      const near = add(new THREE.InstancedMesh(mergeTree(parts), mat, mine.length), true);
-      for (const t of mine) {
-        t.near = near; t.far = far; t.shadow = k.shadow; t.matrix = new THREE.Matrix4(); t.blobMatrix = new THREE.Matrix4(); t.isNear = true;
-        t.yaw = k.kind === 'cyp' ? down + (R() - 0.5) * 0.5 : k.kind === 'pine' ? down + (R() - 0.5) * 1.1 : R() * 6.28;
-        t.scale = new THREE.Vector3(t.sc * (0.9 + R() * 0.2), t.sc * (0.85 + R() * 0.3), t.sc * (0.9 + R() * 0.2));
-        place(t);
-      }
-    });
+  // each tree's pose is fixed for the session, whatever tier (and so whichever shared shape) it is drawn with
+  for (const t of spots) {
+    t.shadow = KINDS[t.kind].shadow; t.matrix = new THREE.Matrix4(); t.blobMatrix = new THREE.Matrix4(); t.isNear = true;
+    t.yaw = t.kind === 'cyp' ? down + (R() - 0.5) * 0.5 : t.kind === 'pine' ? down + (R() - 0.5) * 1.1 : R() * 6.28;
+    t.scale = new THREE.Vector3(t.sc * (0.9 + R() * 0.2), t.sc * (0.85 + R() * 0.3), t.sc * (0.9 + R() * 0.2));
+    place(t);
   }
-  add(blobs, false);
+  // the instanced meshes are rebuilt once whenever the tier changes; merged shapes are cached while a tier uses them
+  // and disposed as soon as one doesn't, the old instance buffers are released with their meshes
+  const cache = new Map(), mats = {};
+  const shape = (key, make) => { if (!cache.has(key)) cache.set(key, mergeTree(make())); return cache.get(key); };
+  const add = (mesh, shadow) => { mesh.castShadow = shadow; mesh.receiveShadow = true; mesh.frustumCulled = false; mesh.count = 0; g.add(mesh); meshes.push(mesh); return mesh; };
+  let built = null;
+  const build = (lvl) => {
+    for (const mesh of meshes) { g.remove(mesh); mesh.dispose(); }
+    meshes.length = 0;
+    const need = new Set(), want = TREE_VARIANTS[lvl];
+    for (const [kind, k] of Object.entries(KINDS)) {
+      const list = spots.filter((t) => t.kind === kind); if (!list.length) continue;
+      const mat = mats[kind] || (mats[kind] = swayMaterial(new THREE.MeshLambertMaterial({ vertexColors: true, side: k.leaves ? THREE.DoubleSide : THREE.FrontSide }), k.sway, k.h, { rim: true, foliage: true, holes: k.holes, ragged: !k.leaves, flatNormal: k.leaves }));
+      need.add(`${kind}:far`);
+      const far = add(new THREE.InstancedMesh(shape(`${kind}:far`, k.far), mat, list.length), false);
+      const nvar = Math.min(want[kind], k.geos.length);
+      for (let vi = 0; vi < nvar; vi++) {
+        const mine = list.filter((_, i) => i % nvar === vi); if (!mine.length) continue;
+        need.add(`${kind}:${vi}`);
+        const near = add(new THREE.InstancedMesh(shape(`${kind}:${vi}`, k.geos[vi]), mat, mine.length), true);
+        for (const t of mine) { t.near = near; t.far = far; }
+      }
+    }
+    for (const [key, geo] of cache) if (!need.has(key)) { geo.dispose(); cache.delete(key); }
+    built = lvl; g.userData.builds = (g.userData.builds || 0) + 1;
+  };
   g.userData.spots = spots;
+  g.userData.stats = () => ({ level: built, meshes: meshes.length, shapes: cache.size, builds: g.userData.builds });
   // which trees are drawn, and how: the quality level drops low-priority trees, distance picks near or far meshes,
   // and trees well behind the camera are skipped (their shadows would fall out of view anyway)
-  let lv = 'high', treeNear = 1e4;
+  let lv = level, treeNear = 1e4;
   const refresh = (cx, cz, fx, fz) => {
     for (const mesh of meshes) mesh.count = 0;
+    blobs.count = 0;
     for (const t of spots) {
       if (t.pri > QUALITY_PRI[lv]) continue;
       const ddx = t.x - cx, ddz = t.z - cz, d = Math.hypot(ddx, ddz);
@@ -525,10 +602,11 @@ export function createTrees() {
       const mesh = t.isNear ? t.near : t.far;
       mesh.setMatrixAt(mesh.count++, t.matrix); blobs.setMatrixAt(blobs.count++, t.blobMatrix);
     }
-    for (const mesh of meshes) { mesh.visible = mesh.count > 0; if (!mesh.visible) continue; mesh.instanceMatrix.clearUpdateRanges(); mesh.instanceMatrix.addUpdateRange(0, mesh.count * 16); mesh.instanceMatrix.needsUpdate = true; }
+    for (const mesh of [...meshes, blobs]) { mesh.visible = mesh.count > 0; if (!mesh.visible) continue; mesh.instanceMatrix.clearUpdateRanges(); mesh.instanceMatrix.addUpdateRange(0, mesh.count * 16); mesh.instanceMatrix.needsUpdate = true; }
   };
+  build(level);
   const view = { x: 1e9, z: 1e9, fx: 0, fz: -1 };
-  g.userData.setQuality = (level, near) => { lv = level; treeNear = near; refresh(view.x, view.z, view.fx, view.fz); };
+  g.userData.setQuality = (lvl, near) => { if (lvl !== built) build(lvl); lv = lvl; treeNear = near; refresh(view.x, view.z, view.fx, view.fz); };
   g.userData.update = (cx, cz, fx, fz) => { view.x = cx; view.z = cz; view.fx = fx; view.fz = fz; refresh(cx, cz, fx, fz); };
   let framing = null;
   g.userData.frame = (portrait) => {
@@ -546,7 +624,7 @@ export function createTrees() {
 export function lodScatter(mesh) {
   const n = mesh.userData.max, src = mesh.instanceMatrix.array.slice(0, n * 16), col = mesh.instanceColor ? mesh.instanceColor.array.slice(0, n * 3) : null;
   const R = rng(n * 7 + 3), keep = new Float32Array(n);
-  for (let i = 0; i < n; i++) keep[i] = R();   // a stable per-instance threshold: the same tufts stay as density drops
+  for (let i = 0; i < n; i++) keep[i] = i < (mesh.userData.always || 0) ? 0 : R();   // a stable per-instance threshold: the same tufts stay as density drops
   const dst = mesh.instanceMatrix.array, dcol = col && mesh.instanceColor.array;
   mesh.userData.lod = (cx, cz, fx, fz, frac, near, far) => {
     let c = 0;

@@ -110,10 +110,10 @@ async function build() {
   await loadStep('Planting cypress and dune grass', 0.55);
   // scatter is thinned by distance from the camera every few metres it moves (see updateLod); reach: how far each kind
   // carries relative to the tier's near/far distances (bigger plants stay visible further out)
-  W0.scatter = { grass: createGrass(touch ? 9000 : 20000), flowers: createFlowers(touch ? 2600 : 5000), ice: createIcePlant(touch ? 1400 : 2600), rocks: createBeachRocks(touch ? 260 : 420), drift: createDriftwood(40), shrubs: createShrubs(touch ? 700 : 1100) };
+  W0.scatter = { grass: createGrass(touch ? 9000 : 20000, touch ? 650 : 1000), flowers: createFlowers(touch ? 2600 : 5000), ice: createIcePlant(touch ? 1400 : 2600), rocks: createBeachRocks(touch ? 260 : 420), drift: createDriftwood(40), shrubs: createShrubs(touch ? 700 : 1100) };
   W0.reach = { grass: 1, flowers: 0.8, ice: 1.4, rocks: 1.6, drift: 1.6, shrubs: 1.7 };
   for (const m of Object.values(W0.scatter)) { lodScatter(m); scene.add(m); }
-  W0.trees = createTrees(); scene.add(W0.trees);
+  W0.trees = createTrees(qLevel); scene.add(W0.trees);
   // ball, effects
   W0.ballMesh = createBall(); scene.add(W0.ballMesh);
   W0.tracer = new Ribbon(260, 0xf2fbfa, 0.6, 0.003, 0.016); scene.add(W0.tracer.mesh);
@@ -156,8 +156,10 @@ function applyLook() {
   else { sun.color.copy(look.sun); sun.intensity = Math.max(0.05, look.sunI * 0.8); W0.lightDir = sunDir; }
   const fogC = look.hor.clone();
   scene.fog.color.copy(fogC);
-  const base = Math.min(0.0022, Math.max(0.00042, 1.4 / Math.max(300, weather.visibility)));
-  scene.fog.density = THREE.MathUtils.lerp(base, 0.0024, weather.fogFactor * 0.85);
+  // a marine layer: thick enough that the Rock looms as a soft shape at ~550 m, thin enough that the green (~345 m from
+  // the tee) still reads as green under the flag
+  const base = Math.min(0.0018, Math.max(0.00042, 1.4 / Math.max(300, weather.visibility)));
+  scene.fog.density = THREE.MathUtils.lerp(base, 0.00185, weather.fogFactor * 0.85);
   renderer.toneMappingExposure = look.exp * (1 + night * 0.2);
   // grade: moonlight is desaturated with lifted blue shadows; bloom only catches the moon, lights and glints at night
   gradeState.sat = 1.12 - night * 0.36; gradeState.lift.set(0.004, 0.011, 0.03).multiplyScalar(night);
@@ -214,7 +216,9 @@ function applyGrade() {
 }
 
 // ---------- quality ----------
+let tierChanges = 0;
 function setQuality(level, persist = true) {
+  if (level !== qLevel) tierChanges++;
   qLevel = level; const q = QUALITY[level];
   dpr = Math.min(window.devicePixelRatio || 1, q.dpr);
   renderer.setPixelRatio(dpr); renderer.setSize(W, H, false);
@@ -349,8 +353,9 @@ const SCORE_NAMES = { '-3': 'Albatross', '-2': 'Eagle', '-1': 'Birdie', 0: 'Par'
 function relText(n) { return n === 0 ? 'E' : n > 0 ? `+${n}` : `${n}`; }
 function holeOut() {
   G.state = 'holed'; G.t = 0; G.timeScale = 0.35; G.holeT0 = elapsed;
+  cupShot(0); pinLay.set = false;
   audio.rattle();
-  confetti(W0.parts, cupPos());
+  confetti(W0.parts, cupPos(), W0.night);
   const rel = G.strokes - PAR;
   const name = G.strokes === 1 ? 'Hole in one!' : (SCORE_NAMES[rel] ?? `${relText(rel)}`);
   $('banner-title').textContent = 'Hole out!';
@@ -552,9 +557,7 @@ function update(rdt) {
   W0.gulls.userData.update(elapsed); W0.boats.userData.update(elapsed);
   W0.wisps.uniforms.uTime.value = elapsed; W0.mist.uniforms.uTime.value = elapsed;
   // the pin is pulled on hole-out so the flagstick never blocks the celebration shot
-  { const pin = W0.flag.pin, ud = pin.userData;
-    ud.pull = (G.state === 'holed' || G.state === 'end') ? Math.min(1, (ud.pull || 0) + rdt * 1.4) : 0;
-    pin.position.y = ud.pull * ud.pull * 4; pin.rotation.z = ud.pull * 0.25; pin.visible = ud.pull < 0.97; }
+  updatePinPose(rdt);
   // rim light: strongest when looking toward a low sun (or the moon, cooler and softer)
   { const f = camera.getWorldDirection(tmp), ld = W0.lightDir, k = Math.max(0, (f.x * ld.x + f.z * ld.z) / (Math.hypot(ld.x, ld.z) || 1));
     const amt = W0.night > 0.5 ? (0.1 + k * k * 0.6) * 0.45 : (0.12 + k * k * 0.9) * (0.3 + W0.low);
@@ -612,7 +615,8 @@ function update(rdt) {
 
   // ball visual: real-size up close, a little larger far away so it stays readable
   const bm = W0.ballMesh, bd = camera.position.distanceTo(tmp.set(ball.p.x, ball.p.y, ball.p.z));
-  const r = Math.max(BALL_R * 1.5, bd * 0.0045);
+  const holedK = ball.state === 'holed' ? Math.min(1, G.t / 0.35) : 0;
+  const r = Math.max(BALL_R * (1.5 + holedK * 0.9), bd * 0.0045);
   bm.scale.setScalar(r); bm.position.set(ball.p.x, ball.p.y - BALL_R + r * (ball.state === 'flight' ? 1 : 0.92) + (ball.state === 'rest' ? meshOffset() : 0), ball.p.z);
   bm.visible = ball.state !== 'holed' && ball.state !== 'water' || G.state === 'flight';
   if (ball.state === 'holed') {
@@ -620,7 +624,7 @@ function update(rdt) {
     // drops in and stays nestled in the cup with its crown showing, so the hero shot reads "ball in the hole"
     bm.visible = true;
     bm.position.x += (c.x - bm.position.x) * k; bm.position.z += (c.z - bm.position.z) * k;
-    bm.position.y += (c.y + 0.025 - r * 0.2 - bm.position.y) * Math.min(1, G.t / 0.3);
+    bm.position.y += (c.y + 0.025 - r * 0.05 - bm.position.y) * Math.min(1, G.t / 0.3);
   }
   const onPeg = ball.lie === 'tee' && ball.state === 'rest' && G.strokes === 0;
   W0.peg.visible = onPeg; if (onPeg) { W0.peg.scale.setScalar(r * 0.42); W0.peg.position.set(ball.p.x, bm.position.y - r * 0.98, ball.p.z); }
@@ -635,6 +639,41 @@ function update(rdt) {
   updatePin();
   updateWindArrow();
   updateLod(rdt);
+}
+
+// the pin: on a hole-out it is lifted out and laid on the green just behind the cup, like a caddie would, clear of the
+// cup, the banner and the Rock. In play it is drawn larger with distance so it reads from the tee.
+const pinQ = new THREE.Quaternion(), pinLay = { pos: new V3(), q: new THREE.Quaternion(), set: false };
+const pinMat = new THREE.Matrix4(), pinX = new V3(), pinY = new V3(), pinZ = new V3(0, 1, 0);
+function layPin() {
+  // laid just behind the cup and running steeply away to the left (foreshortened, inside a portrait frame and clear of
+  // the banner on the right); the cloth rests a little proud of the turf, angled toward the camera so its "1" shows
+  const c = cupPos(), fx = Math.sin(cup.psi), fz = -Math.cos(cup.psi), rx = -fz, rz = fx;
+  const dx = -rx * 0.45 + fx * 0.9, dz = -rz * 0.45 + fz * 0.9;
+  const bx = c.x + fx * 0.75 - rx * 0.4, bz = c.z + fz * 0.75 - rz * 0.4;
+  const y = (heightAt(bx, bz) + heightAt(bx + dx * 2.4, bz + dz * 2.4)) / 2 - c.y + 0.045;
+  pinLay.pos.set(bx - c.x, y, bz - c.z);
+  pinY.set(dx, 0, dz).normalize(); pinX.set(pinY.z, 0, -pinY.x); if (pinX.x * fx + pinX.z * fz < 0) pinX.negate();
+  pinX.multiplyScalar(Math.cos(0.6)).addScaledVector(pinZ.set(0, 1, 0), Math.sin(0.6)); pinZ.crossVectors(pinX, pinY);
+  pinMat.makeBasis(pinX, pinY, pinZ); pinLay.q.setFromRotationMatrix(pinMat);
+  pinLay.set = true;
+}
+function updatePinPose(rdt) {
+  const pin = W0.flag.pin, ud = pin.userData, out = G.state === 'holed' || G.state === 'end';
+  ud.pull = out ? Math.min(1, (ud.pull || 0) + rdt * 1.6) : 0;
+  W0.flag.uniforms.uLie.value = ud.pull > 0.45 ? 1 : 0;
+  if (!out) {
+    pinLay.set = false; pin.quaternion.identity(); pin.position.set(0, 0, 0);
+    const d = Math.hypot(camera.position.x - CUP.x, camera.position.z - CUP.z);
+    const k = Math.min(3, Math.max(1, 1 + (d - 70) / 110));
+    pin.scale.setScalar(k); W0.flag.pole.scale.set(k, 1, k);   // the pole thickens a little more, so it stays a visible line
+    return;
+  }
+  if (!pinLay.set) { if (cup.psi === undefined) cupShot(0); layPin(); }
+  pin.scale.setScalar(1); W0.flag.pole.scale.set(1, 1, 1);
+  const up = Math.min(1, ud.pull / 0.3), lay = ease(Math.max(0, (ud.pull - 0.3) / 0.7));
+  pin.position.set(0, up * 0.9, 0).lerp(pinLay.pos, lay); pin.position.y += Math.sin(lay * Math.PI) * 0.5;
+  pin.quaternion.slerpQuaternions(pinQ.identity(), pinLay.q, lay);
 }
 
 function ordinal(n) { return n + (['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] || ['th', 'st', 'nd', 'rd'][n % 100] || 'th'); }
@@ -665,6 +704,9 @@ function updateCamera(rdt, dt) {
     if (G.state === 'holed') {
       cupShot(elapsed - G.holeT0);
       camera.position.lerp(cup.pos, damp(3, rdt)); cam.look.lerp(cup.look, damp(4, rdt)); lens(cup.fov, damp(3, rdt));
+      camera.position.y = Math.max(camera.position.y, heightAt(camera.position.x, camera.position.z) + 0.25, 0.4);
+      camera.lookAt(cam.look); keepSummit();
+      return;
     } else if (G.slowmo) {
       // low and off to the side so the cup sits left of centre and the flagstick never blocks the drop
       const c = cupPos(), d = cam.dir, px = -d.y, pz = d.x;
@@ -687,7 +729,7 @@ function updateCamera(rdt, dt) {
   }
   if (G.state === 'end') {
     cupShot(elapsed - G.holeT0);
-    camera.position.lerp(cup.pos, damp(1.5, rdt)); cam.look.lerp(cup.look, damp(2, rdt)); lens(cup.fov, damp(2, rdt)); camera.lookAt(cam.look);
+    camera.position.lerp(cup.pos, damp(1.5, rdt)); cam.look.lerp(cup.look, damp(2, rdt)); lens(cup.fov, damp(2, rdt)); camera.lookAt(cam.look); keepSummit();
     return;
   }
   camera.lookAt(cam.look);
@@ -707,13 +749,13 @@ function rockTop(p) {
   }
   SUMMIT.y += 4; rockSpan.mid = a0 + (lo + hi) / 2;
 }
-const cup = { pos: new V3(), look: new V3(), fov: 60 };
+const cup = { pos: new V3(), look: new V3(), fov: 60, psi: undefined };
 const heroFrame = () => camera.aspect < 1
   ? { cx: -0.4, cy: -0.4, sx: 0.04, sy: 0.5, maxT: 1.35 }       // portrait: cup above the bottom HUD, summit below the top chips
   : { cx: -0.44, cy: -0.42, sx: 0.1, sy: 0.78, maxT: 1.0 };
 function cupShot(t) {
   const c = cupPos(), f = heroFrame(), asp = camera.aspect, te = Math.max(0, t - 3.2);
-  const hd = 2.7 + Math.min(t, 3.2) * 0.12 + Math.min(te, 14) * 0.32, h = 0.62 + Math.min(t, 3.2) * 0.03 + Math.min(te, 14) * 0.07;
+  const hd = 2.3 + Math.min(t, 3.2) * 0.12 + Math.min(te, 14) * 0.32, h = 0.62 + Math.min(t, 3.2) * 0.03 + Math.min(te, 14) * 0.07;
   rockTop(cup.pos.lengthSq() ? cup.pos : c);
   let T = Math.tan(cup.fov * Math.PI / 360), psi = 0, p = 0, cyaw = rockSpan.mid;
   const P = cup.pos;
@@ -730,15 +772,23 @@ function cupShot(t) {
     psi = rockSpan.mid + te * 0.006 - phM; cyaw = psi + phC;
   }
   P.set(c.x - Math.sin(cyaw) * hd, c.y + h, c.z + Math.cos(cyaw) * hd);
-  cup.fov = Math.atan(T) * 360 / Math.PI;
+  cup.fov = Math.atan(T) * 360 / Math.PI; cup.psi = psi;
   cup.look.set(P.x + Math.sin(psi) * Math.cos(p) * 10, P.y + Math.sin(p) * 10, P.z - Math.cos(psi) * Math.cos(p) * 10);
+}
+// the camera and lens ease into the hero pose, and part-way there the lens can be too tight for the Rock: widen it
+// whenever the top of the Rock (seen from where the camera really is) would leave the frame, with a little sky above
+function keepSummit() {
+  rockTop(camera.position); camera.updateMatrixWorld();
+  const v = tmp.copy(SUMMIT).applyMatrix4(camera.matrixWorldInverse); if (v.z >= -1) return;
+  const need = v.y / -v.z / 0.9;
+  if (need > Math.tan(camera.fov * Math.PI / 360)) { camera.fov = Math.min(110, Math.atan(need) * 360 / Math.PI); camera.updateProjectionMatrix(); }
 }
 function lens(fov, k) { if (Math.abs(camera.fov - fov) > 0.01) { camera.fov += (fov - camera.fov) * k; camera.updateProjectionMatrix(); } }
 
 function updatePin() {
   const el = $('pin');
   if (!['aim', 'settle'].includes(G.state) || ball.lie === 'green' && distToCup() < 12) { el.hidden = true; return; }
-  pinV.set(CUP.x, heightAt(CUP.x, CUP.z) + 2.6, CUP.z).project(camera);
+  pinV.set(CUP.x, heightAt(CUP.x, CUP.z) + 2.75 * W0.flag.pin.scale.y, CUP.z).project(camera);   // just above the (distance-scaled) flag
   if (pinV.z > 1 || Math.abs(pinV.x) > 1.05 || Math.abs(pinV.y) > 1.05) { el.hidden = true; return; }
   el.hidden = false;
   el.style.transform = `translate(${(pinV.x * 0.5 + 0.5) * W}px, ${(-pinV.y * 0.5 + 0.5) * H}px)`;
@@ -754,7 +804,7 @@ function updateWindArrow() {
 if (TEST) {
   window.__golf = {
     get state() { return G.state; }, get strokes() { return G.strokes; }, get ball() { return { ...ball.p, state: ball.state, lie: ball.lie }; },
-    get fps() { return perf.fps; }, get fpsHistory() { return perf.history.slice(); }, get frameMs() { return { update: +perf.upd.toFixed(2), render: +perf.ren.toFixed(2) }; }, info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }), get quality() { return qLevel; }, autoStart, get weather() { return weather; }, errors,
+    get fps() { return perf.fps; }, get fpsHistory() { return perf.history.slice(); }, get frameMs() { return { update: +perf.upd.toFixed(2), render: +perf.ren.toFixed(2) }; }, info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }), get quality() { return qLevel; }, get tierChanges() { return tierChanges; }, autoStart, get weather() { return weather; }, errors,
     get yaw() { return G.yaw; }, W0, camera, renderer, scene,
     shoot: (club, power, angleDeg = 0) => { if (club) setClub(club, true); return shoot(G.club, power, G.yaw + angleDeg * Math.PI / 180); },
     freeCam: (...a) => { cam.free = a.length ? a : null; update(1 / 30); post.render(); },
