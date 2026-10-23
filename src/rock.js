@@ -1,7 +1,7 @@
 // Morro Rock: a domed volcanic plug with fractured cliffs, strata, scrub, a dark wet base and boulders at the waterline.
 import * as THREE from 'three';
 import { ROCK } from './course.js';
-import { n3, fbm3, ridged3, GLSL_NOISE, rimUniforms, GLSL_RIM_DECL, GLSL_RIM } from './noise.js';
+import { n3, fbm3, ridged3, GLSL_NOISE, rimUniforms, tameUniforms, GLSL_RIM_DECL } from './noise.js';
 
 function shape(dx, dy, dz, out) {
   // dx,dy,dz: unit direction. Returns a point in metres (rock-local) and a cavity estimate for AO.
@@ -43,12 +43,12 @@ export function createRock(quality = 'high') {
   geo.computeVertexNormals();
   const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   mat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, rimUniforms);
+    Object.assign(sh.uniforms, rimUniforms, tameUniforms);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float aAO; varying float vAO; varying vec3 vRP; varying vec3 vRN;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvAO = aAO; vRP = position; vRN = normal;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\n${GLSL_NOISE}\n${GLSL_RIM_DECL}\nvarying float vAO; varying vec3 vRP; varying vec3 vRN;`)
+      .replace('#include <common>', `#include <common>\n${GLSL_NOISE}\n${GLSL_RIM_DECL}\nuniform float uTame, uRelief;\nvarying float vAO; varying vec3 vRP; varying vec3 vRN;`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         vec3 P = vRP; vec3 Nw = normalize(vRN);
         float n1 = cgN3(P * 0.035), n2 = cgN3(P * 0.19 + 7.0), n4 = cgN3(P * 0.6);
@@ -72,8 +72,22 @@ export function createRock(quality = 'high') {
         diffuseColor.rgb *= c;`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
         float bh = cgN3(vRP * 0.45) * 0.55 + cgN3(vRP * 1.4) * 0.25 + cgN3(vec3(vRP.x * 0.5, vRP.y * 0.06, vRP.z * 0.5)) * 0.45;
-        normal = cgBump(normal, -vViewPosition, bh, 1.4);`)
-      .replace('#include <opaque_fragment>', `${GLSL_RIM}\n#include <opaque_fragment>`);
+        // relief fades where the surface turns away from the key light, so grazing sun/moonlight doesn't draw bright veins
+        #if NUM_DIR_LIGHTS > 0
+          float reliefK = mix(0.4, 1.0, smoothstep(0.0, 0.45, dot(normal, directionalLights[0].direction)));
+        #else
+          float reliefK = 1.0;
+        #endif
+        normal = cgBump(normal, -vViewPosition, bh, 1.15 * uRelief * reliefK);`)
+      .replace('#include <opaque_fragment>', `
+        // rim on the true silhouette only: geometric normal, and only on edges that face the key light
+        { float rimD = dot(nonPerturbedNormal, normalize(vViewPosition)); float rimF = pow(1.0 - clamp(rimD, 0.0, 1.0), 3.0) * smoothstep(-0.3, 0.1, rimD);
+          #if NUM_DIR_LIGHTS > 0
+            rimF *= smoothstep(-0.1, 0.35, dot(nonPerturbedNormal, directionalLights[0].direction));
+          #endif
+          outgoingLight += uRimCol * rimF * uRimK * 0.55; }
+        { float rl = dot(outgoingLight, vec3(0.299, 0.587, 0.114)); outgoingLight = mix(outgoingLight, vec3(rl) * vec3(1.08, 1.0, 0.88), uTame * 0.5) * (1.0 - uTame * 0.16); }   // grey-tan dacite, still warm
+#include <opaque_fragment>`);
   };
   const m = new THREE.Mesh(geo, mat);
   m.position.set(ROCK.x, 0, ROCK.z); m.castShadow = true; m.receiveShadow = true;
@@ -90,13 +104,16 @@ function createBoulders(n) {
   geo.computeVertexNormals();
   const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0x2b2824 }), n);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), v = new THREE.Vector3(), e = new THREE.Euler();
-  for (let i = 0; i < n; i++) {
-    const a = (i / n) * Math.PI * 2 + Math.random() * 0.1, rr = 1.0 + Math.random() * 0.12;
+  let i = 0;
+  for (let t = 0; i < n && t < n * 20; t++) {
+    // clustered in tumbles with gaps between them, never an even ring
+    const a = Math.random() * Math.PI * 2, rr = 0.99 + Math.random() * Math.random() * 0.16;
+    if (fbm3(Math.cos(a) * 3, 0, Math.sin(a) * 3, 2) < 0.5) continue;
     v.set(ROCK.x + Math.cos(a) * ROCK.rx * rr, -0.6 + Math.random() * 0.8, ROCK.z + Math.sin(a) * ROCK.rz * rr);
     e.set(Math.random() * 3, Math.random() * 3, Math.random() * 3); q.setFromEuler(e);
     const sc = 1.5 + Math.random() * Math.random() * 7; s.set(sc, sc, sc);
-    m.compose(v, q, s); mesh.setMatrixAt(i, m);
+    m.compose(v, q, s); mesh.setMatrixAt(i++, m);
   }
-  mesh.receiveShadow = true;
+  mesh.count = i; mesh.receiveShadow = true;
   return mesh;
 }

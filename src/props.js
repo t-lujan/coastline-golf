@@ -24,9 +24,10 @@ function flagTexture() {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 export function createFlag() {
-  const g = new THREE.Group(); const y = heightAt(CUP.x, CUP.z);
+  // the pin (pole + flag) is its own group so it can be pulled on a hole-out while the cup stays put
+  const g = new THREE.Group(), pin = new THREE.Group(); const y = heightAt(CUP.x, CUP.z); g.add(pin);
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 2.4, 8), new THREE.MeshLambertMaterial({ color: 0xf4f4f4 }));
-  pole.position.y = 1.2; pole.castShadow = true; g.add(pole);
+  pole.position.y = 1.2; pole.castShadow = true; pin.add(pole);
   const fgeo = new THREE.PlaneGeometry(0.95, 0.6, 12, 6); fgeo.translate(0.475, 0, 0);
   const uniforms = { uTime: { value: 0 }, uWind: { value: 0.5 } };
   const fmat = new THREE.MeshLambertMaterial({ map: flagTexture(), side: THREE.DoubleSide });
@@ -38,13 +39,13 @@ export function createFlag() {
         transformed.z += sin(position.x * 6.0 - uTime * (4.0 + uWind * 6.0)) * 0.08 * k * (0.4 + uWind);
         transformed.y += sin(position.x * 4.0 - uTime * 5.0) * 0.02 * k;`);
   };
-  const flag = new THREE.Mesh(fgeo, fmat); flag.position.y = 2.08; flag.castShadow = true; g.add(flag);
+  const flag = new THREE.Mesh(fgeo, fmat); flag.position.y = 2.08; flag.castShadow = true; pin.add(flag);
   const cup = new THREE.Mesh(new THREE.CircleGeometry(0.108, 24), new THREE.MeshBasicMaterial({ color: 0x0a0c12 }));
   cup.rotation.x = -Math.PI / 2; cup.position.y = 0.025; g.add(cup);
-  const lip = new THREE.Mesh(new THREE.RingGeometry(0.108, 0.125, 24), new THREE.MeshBasicMaterial({ color: 0xf2f6f6 }));
+  const lip = new THREE.Mesh(new THREE.RingGeometry(0.108, 0.125, 24), new THREE.MeshLambertMaterial({ color: 0xf2f6f6 }));
   lip.rotation.x = -Math.PI / 2; lip.position.y = 0.024; g.add(lip);
   g.position.set(CUP.x, y, CUP.z);
-  return { group: g, flag, uniforms };
+  return { group: g, pin, flag, uniforms };
 }
 export function createTeeMarkers() {
   // classic mushroom tee markers in the palette, a tee sign, and a ball washer post

@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { heightAt, surfaceAt, fairwayDist, greenDist, sandiness, teeDist, inland, fbm, FAIRWAY_HALF, HEADING, ROCK, BOUNDS, TEE } from './course.js';
-import { fbm3, rimUniforms, GLSL_RIM_DECL, GLSL_RIM, GLSL_NOISE } from './noise.js';
+import { fbm3, rimUniforms, tameUniforms, GLSL_RIM_DECL, GLSL_RIM, GLSL_NOISE } from './noise.js';
 
 export const windUniforms = { uTime: { value: 0 }, uWind: { value: new THREE.Vector2(1, 0) }, uGust: { value: 0.5 } };
 
@@ -13,22 +13,32 @@ export function rng(seed) { return () => { seed |= 0; seed = (seed + 0x6d2b79f5)
 
 function swayMaterial(mat, strength, heightScale, { flatNormal = false, rim = false, foliage = false } = {}) {
   mat.onBeforeCompile = (sh) => {
+    if (rim) { Object.assign(sh.uniforms, rimUniforms); sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>\n${GLSL_RIM_DECL}`); }
     if (foliage) {
-      // leaf-clump breakup: world-space noise darkens gaps and bumps the normal so pads read as foliage, not blobs
+      // leaves: world-space clump breakup and bump so tufts read as foliage, not blobs; bark: vertical furrows
+      Object.assign(sh.uniforms, tameUniforms);
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vFP;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvFP = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;');
-      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>\n${GLSL_NOISE}\nvarying vec3 vFP;`)
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>\n${GLSL_NOISE}\nvarying vec3 vFP; uniform float uTame, uAerial;`)
         .replace('#include <color_fragment>', `#include <color_fragment>
-          float isLeaf = step(diffuseColor.r * 1.15, diffuseColor.g);
+          float isLeaf = ${foliage === 'all' ? '1.0' : 'step(diffuseColor.r * 1.15, diffuseColor.g)'};
           float lf = smoothstep(0.25, 0.75, cgN3(vFP * 1.3) * 0.6 + cgN3(vFP * 3.7) * 0.4);
-          diffuseColor.rgb *= mix(1.0, 0.72 + lf * 0.5, isLeaf);`)
+          float furrow = cgN3(vec3(vFP.x * 7.0, vFP.y * 0.8, vFP.z * 7.0));
+          diffuseColor.rgb *= mix(0.62 + furrow * 0.55, 0.72 + lf * 0.5, isLeaf);
+          vec3 leafTint = diffuseColor.rgb / max(diffuseColor.g, 0.002) * 0.6;`)
         .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
-          normal = cgBump(normal, -vViewPosition, (cgN3(vFP * 1.3) * 0.5 + cgN3(vFP * 3.7) * 0.2) * isLeaf, 0.5);`);
-    }
+          normal = cgBump(normal, -vViewPosition, (cgN3(vFP * 1.3) * 0.5 + cgN3(vFP * 3.7) * 0.2) * isLeaf, 0.5);`)
+        .replace('#include <opaque_fragment>', `
+          // a low warm sun keeps needles green instead of turning them orange
+          { float lum = dot(outgoingLight, vec3(0.3, 0.59, 0.11)); outgoingLight = mix(outgoingLight, lum * vec3(0.9, 1.07, 0.88), uTame * 0.5 * isLeaf); }
+          ${rim ? `// backlit leaves glow yellow-green (light through needles), bark gets the plain rim
+          { float rimD = dot(normal, normalize(vViewPosition)); float rimF = pow(1.0 - clamp(rimD, 0.0, 1.0), 2.5) * smoothstep(-0.3, 0.1, rimD);
+            outgoingLight += uRimCol * rimF * uRimK * mix(vec3(1.0), leafTint, isLeaf); }` : ''}
+          #ifdef USE_FOG
+            outgoingLight = mix(outgoingLight, fogColor, smoothstep(30.0, 650.0, vFogDepth) * uAerial);   // aerial perspective
+          #endif
+          #include <opaque_fragment>`);
+    } else if (rim) sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>', `${GLSL_RIM}\n#include <opaque_fragment>`);
     if (flatNormal) sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', 'vec3 normal = normalize( vNormal ); vec3 nonPerturbedNormal = normal;');
-    if (rim) {
-      Object.assign(sh.uniforms, rimUniforms);
-      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>\n${GLSL_RIM_DECL}`).replace('#include <opaque_fragment>', `${GLSL_RIM}\n#include <opaque_fragment>`);
-    }
     sh.uniforms.uTime = windUniforms.uTime; sh.uniforms.uWind = windUniforms.uWind; sh.uniforms.uGust = windUniforms.uGust;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime, uGust; uniform vec2 uWind;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
@@ -96,11 +106,11 @@ export function createGrass(count) {
 // ---------- wildflowers: orange poppies, purple lupine, yellow mustard ----------
 export function createFlowers(count) {
   const stem = colorize(strip(new THREE.PlaneGeometry(0.025, 0.4).translate(0, 0.2, 0)), () => [0.25, 0.4, 0.2]);
-  const hd = (x, y, z, r) => colorize(strip(new THREE.IcosahedronGeometry(r, 1).scale(1, 0.65, 1).translate(x, y, z)), () => [1, 1, 1]);
+  const hd = (x, y, z, r) => colorize(strip(new THREE.OctahedronGeometry(r * 0.8, 0).scale(0.6, 1.8, 0.6).translate(x, y, z)), () => [1, 1, 1]);
   const stem2 = stem.clone().rotateY(1.57), stem3 = stem.clone().scale(1, 0.75, 1).rotateY(0.8).translate(0.08, 0, 0.05);
   const geo = mergeGeometries([stem, stem2, stem3, hd(0, 0.42, 0, 0.085), hd(0.08, 0.31, 0.05, 0.075), hd(-0.08, 0.27, -0.06, 0.07)]);
   const mesh = new THREE.InstancedMesh(geo, swayMaterial(new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }), 0.9, 0.45), count);
-  const rand = rng(23), cols = [[1.0, 0.34, 0.02], [1.0, 0.45, 0.04], [0.42, 0.22, 0.95], [1.0, 0.82, 0.12], [0.95, 0.95, 0.9]];
+  const rand = rng(23), cols = [[1.0, 0.34, 0.02], [1.0, 0.45, 0.04], [0.42, 0.22, 0.95], [1.0, 0.82, 0.12], [0.55, 0.3, 0.95]];
   return scatter(mesh, count, rand, (R, p, q, s, c) => {
     const x = -130 + R() * 260, z = -190 + R() * 430;
     const np = nearPlay(x, z); if (np < 3 || np > 70) return null;
@@ -187,109 +197,135 @@ function limb(a, b, r0, r1, col, seg = 7) {
 function bough(parts, pts, r0, r1, col, seg) {
   for (let i = 0; i < pts.length - 1; i++) parts.push(limb(pts[i], pts[i + 1], lerp(r0, r1, i / (pts.length - 1)), lerp(r0, r1, (i + 1) / (pts.length - 1)), col, seg));
 }
-// a lumpy foliage cluster: sunlit top, darker body, dark underside, AO toward the crown centre
-function clump(c, rx, ry, rz, seed, pal, { detail = 1, flat = 0.7, droop = 1, ao = null } = {}) {
+// a lumpy foliage tuft: sunlit top, darker body, dark underside, AO toward the crown centre. Normals are pulled
+// toward the centre of the tuft's branch cluster and of the whole crown (nrm: [[x, y, z, weight], ...]) so the
+// canopy shades as one soft volume broken into clumps rather than a stack of flat pads.
+function clump(c, rx, ry, rz, seed, pal, { detail = 1, flat = 0.8, droop = 0.7, ao = null, nrm = null, lift = 0.25 } = {}) {
   const g = posOnly(new THREE.IcosahedronGeometry(1, detail));
   const p = g.attributes.position, col = [];
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
-    const k = 0.66 + fbm3(x * 2.3 + seed, y * 2.3, z * 2.3, 3) * 0.75;
+    const k = 0.7 + fbm3(x * 2.1 + seed, y * 2.1, z * 2.1, 3) * 0.6;
     const sy = y > 0 ? flat : droop;
     const X = c[0] + x * rx * k, Y = c[1] + y * ry * k * sy, Z = c[2] + z * rz * k;
     p.setXYZ(i, X, Y, Z);
     const hl = fbm3(x * 3 + seed, y * 3, z * 3, 2), top = Math.max(0, y);
-    let r = y > -0.2 ? pal.mid.map((m, j) => lerp(m, pal.top[j], Math.min(1, top * 0.9 + (hl - 0.5) * 0.8))) : pal.under.slice();
+    const r = y > -0.25 ? pal.mid.map((m, j) => lerp(m, pal.top[j], Math.min(1, Math.max(0, top * 0.8 + (hl - 0.45) * 0.9)))) : pal.under;
     let a = 1;
-    if (ao) { const d = Math.hypot(X - ao[0], (Y - ao[1]) * 1.4, Z - ao[2]) / ao[3]; a = 0.45 + 0.55 * Math.min(1, Math.max(0, d)); }
+    if (ao) { const d = Math.hypot(X - ao[0], (Y - ao[1]) * 1.3, Z - ao[2]) / ao[3]; a = 0.4 + 0.6 * Math.min(1, Math.max(0, d)); }
     col.push(r[0] * a, r[1] * a, r[2] * a);
   }
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   g.computeVertexNormals();
-  const n = g.attributes.normal;
-  for (let i = 0; i < n.count; i++) { const v = new THREE.Vector3(n.getX(i), n.getY(i) + 0.5, n.getZ(i)).normalize(); n.setXYZ(i, v.x, v.y, v.z); }
+  const n = g.attributes.normal, v = new THREE.Vector3(), w = new THREE.Vector3();
+  for (let i = 0; i < n.count; i++) {
+    v.set(n.getX(i), n.getY(i), n.getZ(i));
+    if (nrm) for (const [cx, cy, cz, wt] of nrm) { w.set(p.getX(i) - cx, p.getY(i) - cy, p.getZ(i) - cz).normalize(); v.addScaledVector(w, wt); }
+    v.y += lift; v.normalize(); n.setXYZ(i, v.x, v.y, v.z);
+  }
   return g;
 }
+// linear albedo; the sway shader adds leaf breakup, bark furrows and backlit translucency on top
 const PAL = {
-  pine: { top: [0.075, 0.15, 0.065], mid: [0.035, 0.085, 0.045], under: [0.018, 0.038, 0.028] },
-  euc: { top: [0.30, 0.36, 0.30], mid: [0.17, 0.225, 0.19], under: [0.09, 0.12, 0.105] },
-  oak: { top: [0.10, 0.18, 0.06], mid: [0.045, 0.095, 0.035], under: [0.02, 0.04, 0.02] },
-  cyp: { top: [0.09, 0.17, 0.08], mid: [0.04, 0.095, 0.05], under: [0.10, 0.13, 0.09] },
+  pine: { top: [0.075, 0.15, 0.06], mid: [0.032, 0.078, 0.04], under: [0.014, 0.03, 0.022] },
+  euc: { top: [0.38, 0.47, 0.43], mid: [0.2, 0.28, 0.26], under: [0.12, 0.16, 0.155] },
+  oak: { top: [0.095, 0.155, 0.05], mid: [0.04, 0.08, 0.03], under: [0.015, 0.03, 0.016] },
+  cyp: { top: [0.08, 0.15, 0.07], mid: [0.035, 0.085, 0.045], under: [0.05, 0.07, 0.05] },
 };
-const pineBark = (x, y, z) => { const n = fbm3(x * 4, y * 0.7, z * 4, 2); return [0.19 + n * 0.1, 0.095 + n * 0.045, 0.06 + n * 0.02]; };
+const pineBark = (x, y, z) => { const n = fbm3(x * 4, y * 0.7, z * 4, 2); return [0.2 + n * 0.1, 0.095 + n * 0.045, 0.06 + n * 0.02]; };
 const eucBark = (x, y, z) => {
   const n = fbm3(x * 1.3, y * 0.35, z * 1.3, 3), m = fbm3(x * 4 + 3, y * 1.2, z * 4, 2);
-  let c = n > 0.56 ? [0.70, 0.66, 0.58] : n > 0.44 ? [0.56, 0.55, 0.52] : [0.64, 0.48, 0.36];   // cream, grey, tan peel
-  if (y < 3.5 + m * 2) c = [0.36, 0.30, 0.25];                                                   // shaggy dark base
+  let c = n > 0.56 ? [0.72, 0.68, 0.6] : n > 0.44 ? [0.56, 0.56, 0.53] : [0.64, 0.49, 0.37];   // cream, grey, tan peel
+  if (y < 3.0 + m * 2) c = [0.36, 0.30, 0.25];                                                  // shaggy dark base
   return c.map((v) => v * (0.85 + m * 0.3));
 };
-const oakBark = (x, y, z) => { const n = fbm3(x * 3, y * 3, z * 3, 2); return [0.10 + n * 0.06, 0.085 + n * 0.05, 0.075 + n * 0.04]; };
+const oakBark = (x, y, z) => { const n = fbm3(x * 3, y * 3, z * 3, 2); return [0.09 + n * 0.06, 0.08 + n * 0.05, 0.07 + n * 0.04]; };
 const cypBark = [0.11, 0.08, 0.065];
 
-function pineGeometry(seed) {
-  const R = rng(seed), parts = [], H = 15 + R() * 2.5;
-  const tx = (y) => Math.sin(y * 0.22 + seed) * 0.35 + y * 0.025, tz = (y) => Math.cos(y * 0.17 + seed) * 0.25;
-  const trunk = [0, 0.3, 0.55, 0.8, 1].map((t) => [tx(t * H), t * H - (t === 0 ? 0.5 : 0), tz(t * H)]);
-  bough(parts, trunk, 0.55, 0.1, pineBark, 8);
-  // dead stubs low on the trunk
-  for (let i = 0; i < 5; i++) { const y = 2.5 + R() * 4, a = R() * 6.28, l = 0.7 + R() * 1.1; parts.push(limb([tx(y), y, tz(y)], [tx(y) + Math.cos(a) * l, y - 0.2 + R() * 0.3, tz(y) + Math.sin(a) * l], 0.07, 0.025, [0.22, 0.16, 0.12], 5)); }
-  const ao = [tx(H * 0.75), H * 0.72, tz(H * 0.75), 5.5];
-  const nb = 14;
+function pineGeometry(seed, { H0 = 15, spread = 1 } = {}) {
+  const R = rng(seed), parts = [], H = H0 + R() * 2.5;
+  const lx = (R() - 0.5) * 1.4, lz = (R() - 0.5) * 0.8;
+  const T = (y) => [Math.sin(y * 0.21 + seed) * 0.3 + lx * (y / H) ** 1.5, y, Math.cos(y * 0.17 + seed) * 0.22 + lz * (y / H) ** 1.5];
+  bough(parts, [0, 0.25, 0.5, 0.75, 0.94].map((t) => { const q = T(t * H); if (t === 0) q[1] = -0.5; return q; }), 0.5 * spread + 0.05, 0.12, pineBark, 8);
+  // bare, broken lower limbs
+  for (let i = 0; i < 5; i++) { const y = H * (0.2 + R() * 0.24), a = R() * 6.28, l = 0.6 + R() * 1.4, s = T(y); parts.push(limb(s, [s[0] + Math.cos(a) * l, y - 0.35 + R() * 0.3, s[2] + Math.sin(a) * l], 0.07, 0.022, [0.2, 0.15, 0.11], 5)); }
+  const cc = T(H * 0.72), ao = [cc[0], cc[1] - 0.6, cc[2], 4.6 * spread];
+  const crownN = [cc[0], cc[1] - 1.5, cc[2], 0.55];
+  const nb = 11 + (R() * 3 | 0);
   for (let i = 0; i < nb; i++) {
-    const t = i / (nb - 1), y = H * (0.5 + 0.46 * t) + (R() - 0.5) * 0.8, a = i * 2.39 + R() * 0.9;
-    const len = (5.2 - t * 3.4) * (0.65 + R() * 0.55), up = 0.12 + R() * 0.3;
-    const s0 = [tx(y), y, tz(y)], mid = [s0[0] + Math.cos(a) * len * 0.5, y + len * up * 0.3, s0[2] + Math.sin(a) * len * 0.5];
-    const end = [s0[0] + Math.cos(a) * len, y + len * up, s0[2] + Math.sin(a) * len];
-    bough(parts, [s0, mid, end], 0.17 - t * 0.08, 0.04, pineBark, 5);
-    if (R() < 0.12 && t < 0.5) continue;                                  // a bare, broken limb
-    const sz = 1.05 - t * 0.35, k = 2 + (R() < 0.5 ? 1 : 0) + (len > 3.5 ? 1 : 0);
-    for (let j = 0; j < k; j++) {
-      const u = j === 0 ? 1 : 0.35 + R() * 0.55, c = [lerp(s0[0], end[0], u) + (R() - 0.5) * 1.2, lerp(s0[1], end[1], u) + 0.2 + R() * 0.6, lerp(s0[2], end[2], u) + (R() - 0.5) * 1.2];
-      parts.push(clump(c, (1.15 + R() * 0.5) * sz, (1.0 + R() * 0.35) * sz, (1.1 + R() * 0.5) * sz, seed + i * 3.7 + j, PAL.pine, { flat: 0.85, droop: 0.75, ao }));
-    }
+    const t = i / (nb - 1), y = H * (0.45 + 0.45 * t) + (R() - 0.5) * 0.9, a = i * 2.39996 + (R() - 0.5) * 0.8;
+    const len = (5.6 - t * 3.6) * (0.7 + R() * 0.5) * spread, up = 0.22 + R() * 0.3 + t * 0.25;
+    const s0 = T(y), ca = Math.cos(a), sa = Math.sin(a);
+    const end = [s0[0] + ca * len, y + len * up, s0[2] + sa * len];
+    bough(parts, [s0, [s0[0] + ca * len * 0.5, y + len * up * 0.35, s0[2] + sa * len * 0.5], end], 0.16 - t * 0.07, 0.035, pineBark, 5);
+    if (t < 0.35 && R() < 0.25) continue;                                  // a bare limb keeps the crown open
+    // dense rounded clusters of needle tufts at the limb end, and sometimes on a side fork
+    const ends = [end];
+    if (len > 2.6 && R() < 0.6) { const fa = a + (R() < 0.5 ? 1 : -1) * (0.7 + R() * 0.5), fl = len * 0.45; const f0 = [lerp(s0[0], end[0], 0.5), lerp(s0[1], end[1], 0.5), lerp(s0[2], end[2], 0.5)]; const fe = [f0[0] + Math.cos(fa) * fl, f0[1] + fl * 0.45, f0[2] + Math.sin(fa) * fl]; bough(parts, [f0, fe], 0.07, 0.03, pineBark, 4); ends.push(fe); }
+    ends.forEach((e, ei) => {
+      const sz = (1 - t * 0.25) * (ei ? 0.8 : 1), cl = [e[0], e[1] + 0.35 * sz, e[2]], nt = 3 + (R() < 0.5 ? 1 : 0) + (ei ? 0 : 1);
+      for (let j = 0; j < nt; j++) {
+        const a2 = j * 2.4 + R(), d2 = j ? (0.6 + R() * 0.5) * sz : 0, r = (0.85 + R() * 0.35) * sz;
+        const c = [cl[0] + Math.cos(a2) * d2, cl[1] + (R() - 0.35) * 0.7 * sz, cl[2] + Math.sin(a2) * d2];
+        parts.push(clump(c, r * (1.05 + R() * 0.25), r * (0.9 + R() * 0.2), r * (1.05 + R() * 0.25), seed + i * 3.7 + j * 1.3 + ei * 11, PAL.pine, { flat: 0.9, droop: 0.72, ao, nrm: [[cl[0], cl[1] - 0.3, cl[2], 0.75], crownN] }));
+      }
+    });
   }
-  parts.push(clump([tx(H), H + 0.3, tz(H)], 1.5, 1.2, 1.4, seed + 99, PAL.pine, { flat: 0.85, ao }), clump([tx(H) + 0.8, H - 0.9, tz(H) - 0.6], 1.6, 1.1, 1.4, seed + 98, PAL.pine, { flat: 0.85, ao }));
+  // an irregular, rounded top
+  const tp = T(H * 0.95);
+  for (let j = 0; j < 4; j++) {
+    const a = j * 1.9 + R(), r = j ? 1.0 + R() * 0.6 : 0;
+    parts.push(clump([tp[0] + Math.cos(a) * r, tp[1] + (j ? -0.4 - R() * 0.5 : 0.3), tp[2] + Math.sin(a) * r], 1.05 + R() * 0.35, 0.95, 1.0 + R() * 0.3, seed + 90 + j, PAL.pine, { flat: 0.85, droop: 0.6, ao, nrm: [[tp[0], tp[1] - 0.8, tp[2], 0.7], crownN] }));
+  }
   return parts;
 }
 
 function eucGeometry(seed) {
-  const R = rng(seed), parts = [], H = 20 + R() * 5, fy = H * (0.32 + R() * 0.1);
-  const lean = (R() - 0.5) * 1.2;
-  bough(parts, [[0, -0.5, 0], [lean * 0.3, fy * 0.5, 0.2], [lean, fy, 0]], 0.7, 0.45, eucBark, 9);
-  const ao = [lean, H * 0.72, 0, 7];
-  const nl = 2 + (R() < 0.6 ? 1 : 0);
+  // tall, pale and open: a forked trunk, long leaders, sparse blue-grey foliage hanging in drooping curtains
+  const R = rng(seed), parts = [], H = 21 + R() * 5, fy = H * (0.36 + R() * 0.1);
+  const lean = (R() - 0.5) * 1.4, lz = (R() - 0.5) * 0.6;
+  bough(parts, [[0, -0.5, 0], [lean * 0.25, fy * 0.5, lz * 0.3], [lean, fy, lz]], 0.62, 0.42, eucBark, 9);
+  const cc = [lean, H * 0.72, lz, 0.5], ao = [lean, H * 0.7, lz, 5.5];
+  const nl = 2 + (R() < 0.65 ? 1 : 0);
   for (let l = 0; l < nl; l++) {
-    const a = l / nl * 6.28 + R() * 0.8, sp = 2.2 + R() * 2.5, top = H * (0.86 + R() * 0.14);
-    const m = [lean + Math.cos(a) * sp * 0.45, lerp(fy, top, 0.45), Math.sin(a) * sp * 0.45], e = [lean + Math.cos(a) * sp, top, Math.sin(a) * sp];
-    bough(parts, [[lean, fy, 0], m, e], 0.42, 0.1, eucBark, 7);
-    // side branches that arc out and droop at the tips
+    const a = l / nl * 6.28 + R() * 0.9, sp = 2.0 + R() * 2.6, top = H * (0.84 + R() * 0.16);
+    const m = [lean + Math.cos(a) * sp * 0.4, lerp(fy, top, 0.5), lz + Math.sin(a) * sp * 0.4], e = [lean + Math.cos(a) * sp, top, lz + Math.sin(a) * sp];
+    bough(parts, [[lean, fy, lz], m, e], 0.4, 0.09, eucBark, 7);
     const nbr = 3 + (R() * 2 | 0);
     for (let b = 0; b < nbr; b++) {
-      const u = 0.35 + b / nbr * 0.6, s0 = [lerp(m[0], e[0], u * 0.6), lerp(fy, top, u), lerp(m[2], e[2], u * 0.6)], ba = a + (R() - 0.5) * 2.4, bl = 2.6 + R() * 2.4;
-      const bm = [s0[0] + Math.cos(ba) * bl * 0.55, s0[1] + bl * 0.35, s0[2] + Math.sin(ba) * bl * 0.55], be = [s0[0] + Math.cos(ba) * bl, s0[1] + bl * 0.15, s0[2] + Math.sin(ba) * bl];
-      bough(parts, [s0, bm, be], 0.14, 0.035, eucBark, 5);
-      for (let q = 0; q < 3; q++) {
-        const u = 0.45 + q * 0.27 + R() * 0.1, cx = lerp(s0[0], be[0], u) + (R() - 0.5) * 0.8, cz = lerp(s0[2], be[2], u) + (R() - 0.5) * 0.8, cy = lerp(s0[1], bm[1], 1 - Math.abs(u - 0.55)) - 0.9 - R() * 0.6;
-        parts.push(clump([cx, cy, cz], 0.85 + R() * 0.45, 1.05 + R() * 0.4, 0.8 + R() * 0.4, seed + l * 9 + b * 3 + q, PAL.euc, { detail: 2, flat: 0.55, droop: 1.7, ao }));
+      const u = 0.3 + b / nbr * 0.65, s0 = [lerp(m[0], e[0], u * 0.6), lerp(fy, top, u), lerp(m[2], e[2], u * 0.6)], ba = a + (R() - 0.5) * 2.6, bl = 2.4 + R() * 2.6;
+      const bm = [s0[0] + Math.cos(ba) * bl * 0.55, s0[1] + bl * 0.3, s0[2] + Math.sin(ba) * bl * 0.55], be = [s0[0] + Math.cos(ba) * bl, s0[1] + bl * 0.05, s0[2] + Math.sin(ba) * bl];
+      bough(parts, [s0, bm, be], 0.13, 0.03, eucBark, 5);
+      // foliage hangs in loose, drooping clouds toward the branch tips
+      const tip = [lerp(bm[0], be[0], 0.6), lerp(bm[1], be[1], 0.6) - 0.5, lerp(bm[2], be[2], 0.6)];
+      const nq = 3 + (R() < 0.5 ? 1 : 0);
+      for (let q = 0; q < nq; q++) {
+        const qa = q * 2.3 + R(), qd = q ? 0.7 + R() * 0.6 : 0, r = 0.7 + R() * 0.3;
+        const c = [tip[0] + Math.cos(qa) * qd, tip[1] - q * 0.35 - R() * 0.4, tip[2] + Math.sin(qa) * qd];
+        parts.push(clump(c, r * 1.15, r * 0.9, r * 1.1, seed + l * 9 + b * 3 + q, PAL.euc, { flat: 0.75, droop: 1.3, ao, lift: 0.45, nrm: [[tip[0], tip[1] + 0.3, tip[2], 0.6], cc] }));
       }
+      if (R() < 0.6) { const c = [lerp(s0[0], bm[0], 0.7), lerp(s0[1], bm[1], 0.7) - 0.6, lerp(s0[2], bm[2], 0.7)]; parts.push(clump(c, 0.65, 0.6, 0.6, seed + l * 5 + b * 7, PAL.euc, { flat: 0.75, droop: 1.3, ao, lift: 0.45, nrm: [cc] })); }
     }
-    parts.push(clump([e[0], e[1] - 0.6, e[2]], 1.2, 1.3, 1.1, seed + l * 13 + 70, PAL.euc, { flat: 0.6, droop: 1.6, ao }), clump([e[0] + 1, e[1] - 1.8, e[2] - 0.7], 1.0, 1.2, 0.9, seed + l * 13 + 71, PAL.euc, { flat: 0.6, droop: 1.6, ao }));
+    for (let q = 0; q < 4; q++) { const qa = q * 2.1 + R(), qd = q ? 0.8 + R() * 0.5 : 0; parts.push(clump([e[0] + Math.cos(qa) * qd, e[1] - 0.2 - q * 0.45, e[2] + Math.sin(qa) * qd], 0.95, 0.8, 0.9, seed + l * 13 + 70 + q, PAL.euc, { flat: 0.75, droop: 1.25, ao, lift: 0.45, nrm: [[e[0], e[1] + 0.2, e[2], 0.6], cc] })); }
   }
   return parts;
 }
 
 function oakGeometry(seed) {
-  const R = rng(seed), parts = [];
-  bough(parts, [[0, -0.4, 0], [0.25, 1.2, 0.1], [0.4, 2.3, 0]], 0.85, 0.62, oakBark, 9);
-  const ao = [0.4, 4.6, 0, 6.5];
-  for (let i = 0; i < 5; i++) {
-    const a = i * 1.257 + R() * 0.6, tw = (R() - 0.5) * 0.9, r = 5.2 + R() * 1.4;
-    const pts = [[0.4, 2.2, 0]];
-    for (let k = 1; k <= 3; k++) { const f = k / 3, aa = a + tw * Math.sin(f * 3); pts.push([0.4 + Math.cos(aa) * r * f, 2.2 + Math.sin(f * 2.2) * (2.4 + R() * 0.8) - f * f * 0.6, Math.sin(aa) * r * f]); }
-    bough(parts, pts, 0.42, 0.09, oakBark, 7);
+  // low and wide: a short trunk, gnarled limbs that spread and dip, and a dense rounded canopy that skirts down at the edges
+  const R = rng(seed), parts = [], top = [0.45, 2.0, 0];
+  bough(parts, [[0, -0.4, 0], [0.3, 1.1, 0.1], top], 0.85, 0.6, oakBark, 9);
+  const cc = [top[0], 3.6, 0, 1.1], ao = [top[0], 4.4, 0, 5.8];
+  for (let i = 0; i < 6; i++) {
+    const a = i / 6 * 6.28 + R() * 0.5, tw = (R() - 0.5) * 0.9, r = 4.6 + R() * 1.8, rise = 2.2 + R() * 1.2;
+    const pts = [top];
+    for (let k = 1; k <= 4; k++) { const f = k / 4, aa = a + tw * Math.sin(f * 3); pts.push([top[0] + Math.cos(aa) * r * f, top[1] + Math.sin(f * 2.4) * rise - f * f * 0.5 + (R() - 0.5) * 0.3, top[2] + Math.sin(aa) * r * f]); }
+    bough(parts, pts, 0.42, 0.08, oakBark, 7);
   }
-  for (let i = 0; i < 17; i++) {
-    const a = R() * 6.28, r = Math.sqrt(R()) * 5.8, y = 5.2 - (r / 6.2) ** 2 * 2.6 + R() * 0.6;
-    parts.push(clump([0.4 + Math.cos(a) * r, y, Math.sin(a) * r * 0.9], 2.4 + R() * 0.9, 1.4 + R() * 0.5, 2.2 + R() * 0.8, seed + i * 2.9, PAL.oak, { detail: 2, flat: 0.75, droop: 0.7, ao }));
+  for (let i = 0; i < 38; i++) {
+    const rr = Math.sqrt((i + 0.5) / 38), a = i * 2.39996 + R() * 0.4, r = rr * 6.4;
+    const y = 6.9 - rr * rr * 3.6 + (R() - 0.5) * 0.7, s = 1.45 + (1 - rr) * 0.6 + R() * 0.55;
+    parts.push(clump([top[0] + Math.cos(a) * r, y, Math.sin(a) * r * 0.92], s * 1.15, s * 0.8, s * 1.1, seed + i * 2.9, PAL.oak, { flat: 0.8, droop: 0.65, ao, nrm: [cc] }));
   }
   return parts;
 }
@@ -300,11 +336,11 @@ function cypressGeometry(seed) {
   bough(parts, [[0, -0.4, 0], [0.4, 2.4, 0], [1.6, 4.6, 0.2], [3.4, 6.0, 0]], 0.62, 0.2, cypBark, 8);
   bough(parts, [[1.0, 3.6, 0], [-0.6, 4.8, 0.5], [-2.2, 5.6, 0.9]], 0.24, 0.08, cypBark, 6);
   bough(parts, [[1.8, 4.8, 0.1], [4.2, 5.8, -0.5], [6.4, 6.3, -0.8]], 0.24, 0.08, cypBark, 6);
-  const ao = [3, 6.3, 0, 5];
-  for (let i = 0; i < 13; i++) {
-    const t = i / 12, x = -2.2 + t * 10.5 + (R() - 0.5) * 1.2, z = (R() - 0.5) * (4.2 - t * 1.6);
+  const ao = [3, 6.3, 0, 5], cc = [2.5, 4.6, 0, 0.8];
+  for (let i = 0; i < 15; i++) {
+    const t = i / 14, x = -2.2 + t * 10.5 + (R() - 0.5) * 1.2, z = (R() - 0.5) * (4.2 - t * 1.6);
     const y = 6.3 + Math.sin(t * 3.0) * 0.8 + (R() - 0.5) * 0.6 - t * t * 0.9;
-    parts.push(clump([x, y, z], 2.4 - t * 0.8 + R() * 0.5, 1.15 + R() * 0.3, 2.0 - t * 0.5 + R() * 0.4, i * 3.1, PAL.cyp, { detail: 2, flat: 0.6, droop: 0.9, ao }));
+    parts.push(clump([x, y, z], 2.1 - t * 0.7 + R() * 0.5, 1.05 + R() * 0.3, 1.8 - t * 0.5 + R() * 0.4, i * 3.1 + seed, PAL.cyp, { flat: 0.62, droop: 0.85, ao, nrm: [cc] }));
   }
   return parts;
 }
@@ -312,6 +348,17 @@ function cypressGeometry(seed) {
 function mergeTree(parts) {
   return mergeGeometries(parts.map((p) => { const q = p.index ? p.toNonIndexed() : p; for (const k of Object.keys(q.attributes)) if (!['position', 'normal', 'color'].includes(k)) q.deleteAttribute(k); return q; }));
 }
+
+// the tee camera (aimPose for the driver from the tee): hero trees are placed in its frame so they sit on the
+// edges of the shot. Landscape and portrait need different spots, so the two heroes move with the aspect ratio.
+function teeFrame(D, L) {
+  const yaw = Math.atan2(4.2 - TEE.x, 141.5 + TEE.z), fx = Math.sin(yaw), fz = -Math.cos(yaw), cx = TEE.x - fx * 8.5, cz = TEE.z - fz * 8.5;
+  return { x: cx + fx * D + fz * -L, z: cz + fz * D + fx * L };
+}
+const HEROES = [
+  { kind: 'pine', sc: 1.15, desk: teeFrame(36, -23), port: teeFrame(34, -11) },
+  { kind: 'euc', sc: 1.0, desk: teeFrame(40, 26), port: teeFrame(40, 13) },
+];
 
 function treeSpots() {
   const R = rng(91), spots = [];
@@ -324,35 +371,39 @@ function treeSpots() {
     if (kind === 'oak') return d > 20 && sandiness(x, z) < 0.65;
     return d > 28 && sandiness(x, z) < 0.5;
   };
-  // grove: n trees scattered in a disc, never on a grid, never closer than minD to any other tree
-  const grove = (kind, cx, cz, n, rad, { minD = 8, clear = 7, sc = [0.85, 1.15], pri = 1 } = {}) => {
+  const clearOf = (x, z, kind, minD) => !spots.some((s) => Math.hypot(s.x - x, s.z - z) < minD * (s.kind === 'oak' || kind === 'oak' ? 1.5 : 1));
+  for (const h of HEROES) spots.push({ kind: h.kind, x: h.desk.x, z: h.desk.z, sc: h.sc, pri: 0, hero: h });
+  // grove: n trees scattered through a blob, clumped in pairs and threes, mixed kinds and sizes; never a grid
+  const grove = (kinds, cx, cz, n, rad, { minD = 7, clear = 7, sc = [0.78, 1.18], pri = 1 } = {}) => {
     let placed = 0;
-    for (let t = 0; placed < n && t < n * 60; t++) {
-      const a = R() * 6.28, r = rad * Math.sqrt(R()), x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r * 0.8;
-      if (!ok(x, z, kind, clear)) continue;
-      if (spots.some((s) => Math.hypot(s.x - x, s.z - z) < minD * (s.kind === 'oak' || kind === 'oak' ? 1.4 : 1))) continue;
-      spots.push({ kind, x, z, sc: lerp(sc[0], sc[1], R()), pri: placed === 0 ? pri : pri + 1 }); placed++;
+    for (let t = 0; placed < n && t < n * 80; t++) {
+      const kind = Array.isArray(kinds) ? kinds[R() < 0.78 ? 0 : 1] : kinds;
+      // half the time start a new clump, otherwise grow next to the last tree in this grove
+      const last = placed && R() < 0.5 ? spots[spots.length - 1] : null;
+      const a = R() * 6.28, r = last ? minD * (1.05 + R() * 0.5) : rad * Math.sqrt(R());
+      const x = (last ? last.x : cx) + Math.cos(a) * r, z = (last ? last.z : cz) + Math.sin(a) * r * (last ? 1 : 0.75);
+      if (!ok(x, z, kind, clear) || !clearOf(x, z, kind, minD)) continue;
+      spots.push({ kind, x, z, sc: lerp(sc[0], sc[1], R()), pri: placed < Math.ceil(n * 0.5) ? pri : pri + 1 }); placed++;
     }
   };
-  // hero pines framing the tee shot
-  grove('pine', TEE.x - 15, TEE.z - 24, 1, 3, { clear: 5, sc: [1.2, 1.25], pri: 0 });
-  grove('pine', TEE.x + 24, TEE.z - 28, 1, 4, { clear: 6, sc: [1.05, 1.1], pri: 0 });
-  grove('euc', TEE.x + 40, TEE.z - 14, 2, 8, { minD: 8, clear: 6, sc: [0.95, 1.05], pri: 0 });
-  grove('pine', TEE.x - 10, TEE.z + 40, 5, 26, { pri: 1 });
-  // groves framing the fairway on both sides
-  grove('pine', -34, 92, 6, 24, { pri: 1 });
-  grove('pine', -40, 12, 5, 22, { pri: 1 });
-  grove('pine', 52, 72, 5, 22, { pri: 1 });
-  grove('pine', 50, -45, 4, 18, { pri: 1 });
-  grove('pine', 74, 175, 3, 18, { pri: 2 });
-  // a blue-gum stand up on the bluff east of the course, and a few more behind the tee
-  grove('euc', 122, 40, 8, 28, { minD: 9, clear: 12, pri: 1 });
-  grove('euc', 112, 205, 4, 18, { minD: 9, clear: 12, pri: 2 });
-  grove('euc', -45, 225, 3, 15, { minD: 9, clear: 10, pri: 2 });
+  // groves framing the fairway on both sides, pines with the odd eucalyptus
+  grove(['pine', 'euc'], -36, 95, 6, 26, { pri: 1 });
+  grove('pine', -42, 10, 5, 24, { pri: 1 });
+  grove(['pine', 'euc'], 54, 70, 5, 22, { pri: 1 });
+  grove('pine', 52, -48, 4, 20, { pri: 1 });
+  grove('pine', 76, 172, 3, 18, { pri: 2 });
+  grove('pine', TEE.x - 12, TEE.z + 42, 5, 26, { pri: 1 });
+  grove('pine', -30, 160, 2, 12, { pri: 2 });
+  // blue-gum stands up on the bluff east of the course, and a few more behind the tee
+  grove(['euc', 'pine'], 124, 40, 8, 30, { minD: 8, clear: 12, pri: 1 });
+  grove('euc', TEE.x + 42, TEE.z - 10, 2, 8, { minD: 8, clear: 6, pri: 1 });
+  grove('euc', 112, 205, 4, 18, { minD: 8, clear: 12, pri: 2 });
+  grove('euc', -45, 225, 3, 15, { minD: 8, clear: 10, pri: 2 });
   // coast live oaks in the hollows and behind the green
-  grove('oak', 42, -140, 2, 18, { minD: 12, clear: 8, sc: [0.9, 1.1], pri: 1 });
-  grove('oak', 82, -15, 2, 14, { minD: 12, clear: 10, pri: 1 });
-  grove('oak', 84, 118, 1, 10, { minD: 12, clear: 10, pri: 2 });
+  grove('oak', 44, -142, 2, 16, { minD: 11, clear: 8, sc: [0.9, 1.1], pri: 1 });
+  grove('oak', -30, -150, 1, 10, { minD: 11, clear: 9, sc: [0.85, 1.0], pri: 2 });
+  grove('oak', 82, -15, 2, 14, { minD: 11, clear: 10, pri: 1 });
+  grove('oak', 84, 118, 1, 10, { minD: 11, clear: 10, pri: 2 });
   // rare windswept cypress accents near the water
   grove('cyp', -52, -70, 1, 30, { minD: 20, clear: 9, sc: [0.95, 1.2], pri: 1 });
   grove('cyp', -60, 160, 1, 30, { minD: 20, clear: 9, sc: [0.95, 1.2], pri: 1 });
@@ -360,37 +411,64 @@ function treeSpots() {
   return spots;
 }
 
-export function createTrees(quality = 'high') {
-  const R = rng(5), spots = treeSpots();
-  const keep = quality === 'low' ? 1 : quality === 'med' ? 2 : 9;
-  const live = spots.filter((s) => s.pri <= keep);
+// soft contact shadow under each crown (one instanced draw): darkens the grass where the canopy blocks the sky
+function contactShadows(n) {
+  const g = new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2), p = g.attributes.position, c = [];
+  for (let i = 0; i < p.count; i++) { const r = Math.min(1, Math.hypot(p.getX(i), p.getZ(i))), a = (1 - r * r) ** 2; c.push(0, 0, 0, a); }
+  g.setAttribute('color', new THREE.Float32BufferAttribute(c, 4)); g.deleteAttribute('uv'); g.deleteAttribute('normal');
+  const mat = new THREE.MeshBasicMaterial({ color: 0x000000, vertexColors: true, transparent: true, opacity: 0.5, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -16 });
+  const m = new THREE.InstancedMesh(g, mat, n); m.renderOrder = 1; m.frustumCulled = false;
+  return m;
+}
+const QUALITY_PRI = { high: 9, med: 2, low: 1 };
+
+export function createTrees() {
+  const R = rng(5), spots = treeSpots().sort((a, b) => a.pri - b.pri);
   // prevailing NW wind: crowns sheared toward the south-east
   const lean = (135 - HEADING) * Math.PI / 180, dx = Math.sin(lean), dz = -Math.cos(lean), down = Math.atan2(-dz, dx);
   const kinds = [
-    { kind: 'pine', geos: [pineGeometry(3), pineGeometry(17)], h: 17, sway: 0.25 },
-    { kind: 'euc', geos: [eucGeometry(7), eucGeometry(29)], h: 24, sway: 0.35 },
-    { kind: 'oak', geos: [oakGeometry(11)], h: 8, sway: 0.15 },
-    { kind: 'cyp', geos: [cypressGeometry(13)], h: 8, sway: 0.2 },
+    { kind: 'pine', geos: [pineGeometry(3), pineGeometry(17), pineGeometry(41, { H0: 12.5, spread: 0.85 })], h: 17, sway: 0.25, shadow: 5.5 },
+    { kind: 'euc', geos: [eucGeometry(7), eucGeometry(29)], h: 24, sway: 0.35, shadow: 4.8 },
+    { kind: 'oak', geos: [oakGeometry(11)], h: 8, sway: 0.15, shadow: 7.5 },
+    { kind: 'cyp', geos: [cypressGeometry(13)], h: 8, sway: 0.2, shadow: 5.5 },
   ];
-  const g = new THREE.Group();
+  const g = new THREE.Group(), meshes = [], m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
+  const blobs = contactShadows(spots.length), up = new THREE.Vector3(0, 1, 0), nv = new THREE.Vector3(), qy = new THREE.Quaternion();
+  const place = (t) => {
+    p.set(t.x, heightAt(t.x, t.z) - 0.25, t.z); q.setFromAxisAngle(up, t.yaw); m.compose(p, q, t.scale); t.mesh.setMatrixAt(t.index, m); t.mesh.instanceMatrix.needsUpdate = true;
+    const e = 0.6, n = nv.set(heightAt(t.x - e, t.z) - heightAt(t.x + e, t.z), 2 * e, heightAt(t.x, t.z - e) - heightAt(t.x, t.z + e)).normalize();
+    q.setFromUnitVectors(up, n).multiply(qy.setFromAxisAngle(up, t.yaw));
+    const r = t.sc * t.shadow; p.set(t.x, heightAt(t.x, t.z) + 0.12, t.z); s.set(r, 1, r); m.compose(p, q, s); blobs.setMatrixAt(t.blob, m); blobs.instanceMatrix.needsUpdate = true;
+  };
+  spots.forEach((t, i) => { t.blob = i; });
   for (const k of kinds) {
-    const list = live.filter((s) => s.kind === k.kind);
+    const list = spots.filter((t) => t.kind === k.kind);
     k.geos.forEach((parts, vi) => {
       const mine = list.filter((_, i) => i % k.geos.length === vi); if (!mine.length) return;
       const mat = swayMaterial(new THREE.MeshLambertMaterial({ vertexColors: true }), k.sway, k.h, { rim: true, foliage: true });
       const mesh = new THREE.InstancedMesh(mergeTree(parts), mat, mine.length);
-      const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
       mine.forEach((t, i) => {
-        p.set(t.x, heightAt(t.x, t.z) - 0.25, t.z);
-        const yaw = k.kind === 'cyp' ? down + (R() - 0.5) * 0.5 : R() * 6.28;
-        q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, yaw);
-        s.set(t.sc * (0.9 + R() * 0.2), t.sc * (0.88 + R() * 0.24), t.sc * (0.9 + R() * 0.2)); m.compose(p, q, s); mesh.setMatrixAt(i, m);
+        t.mesh = mesh; t.index = i; t.shadow = k.shadow;
+        t.yaw = k.kind === 'cyp' ? down + (R() - 0.5) * 0.5 : R() * 6.28;
+        t.scale = new THREE.Vector3(t.sc * (0.9 + R() * 0.2), t.sc * (0.85 + R() * 0.3), t.sc * (0.9 + R() * 0.2));
+        place(t);
       });
+      // instances are sorted by priority, so a quality level is just an instance count
+      mesh.userData.lv = Object.fromEntries(Object.entries(QUALITY_PRI).map(([lv, pri]) => [lv, mine.filter((t) => t.pri <= pri).length]));
       mesh.castShadow = true; mesh.receiveShadow = true;
-      g.add(mesh);
+      g.add(mesh); meshes.push(mesh);
     });
   }
-  g.userData.spots = live;
+  blobs.userData.lv = Object.fromEntries(Object.entries(QUALITY_PRI).map(([lv, pri]) => [lv, spots.filter((t) => t.pri <= pri).length]));
+  g.add(blobs); meshes.push(blobs);
+  g.userData.spots = spots;
+  g.userData.setQuality = (lv) => { for (const mesh of meshes) mesh.count = mesh.userData.lv[lv]; };
+  let framing = null;
+  g.userData.frame = (portrait) => {
+    const f = portrait ? 'port' : 'desk'; if (f === framing) return; framing = f;
+    for (const t of spots) if (t.hero) { t.x = t.hero[f].x; t.z = t.hero[f].z; place(t); }
+  };
+  g.userData.frame(false);
   return g;
 }
 
@@ -399,8 +477,8 @@ export function createShrubs(count) {
   const parts = [];
   const pal = { top: [1.0, 1.0, 1.0], mid: [0.72, 0.72, 0.72], under: [0.38, 0.38, 0.38] };
   [[0, 0.42, 0, 0.5, 0.45, 0.5], [0.5, 0.3, 0.2, 0.42, 0.36, 0.4], [-0.45, 0.28, -0.25, 0.45, 0.34, 0.42], [0.1, 0.26, -0.55, 0.38, 0.3, 0.36], [-0.2, 0.25, 0.5, 0.4, 0.3, 0.38], [0.35, 0.55, -0.15, 0.32, 0.3, 0.3]]
-    .forEach(([x, y, z, a, b, c], i) => parts.push(clump([x, y, z], a, b, c, i * 4.1 + 2, pal, { flat: 0.85, droop: 0.6, ao: [0, 0.2, 0, 1.0] })));
-  const mesh = new THREE.InstancedMesh(mergeTree(parts), swayMaterial(new THREE.MeshLambertMaterial({ vertexColors: true }), 0.25, 1.2, { foliage: true }), count);
+    .forEach(([x, y, z, a, b, c], i) => parts.push(clump([x, y, z], a, b, c, i * 4.1 + 2, pal, { detail: 0, flat: 0.85, droop: 0.6, ao: [0, 0.2, 0, 1.0], nrm: [[0, 0.05, 0, 0.9]] })));
+  const mesh = new THREE.InstancedMesh(mergeTree(parts), swayMaterial(new THREE.MeshLambertMaterial({ vertexColors: true }), 0.25, 1.2, { foliage: 'all' }), count);
   const rand = rng(53);
   return scatter(mesh, count, rand, (R, p, q, s, c) => {
     const x = -150 + R() * 330, z = -210 + R() * 470;

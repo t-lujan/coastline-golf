@@ -30,6 +30,10 @@ export const GLSL_NOISE = /* glsl */`
     return normalize(abs(det) * nrm - g * k);
   }`;
 
+// uTame 0..1: how hard to pull warm low-sun light back toward natural colours (rock, foliage at golden hour)
+// uAerial: how far distant foliage fades toward the haze
+// uRelief: scales the rock's fine bump relief (softer under a grazing low sun or moonlight)
+export const tameUniforms = { uTame: { value: 0 }, uAerial: { value: 0.25 }, uRelief: { value: 1 } };
 // a shared rim / back light: brightens silhouettes when the camera looks toward the sun
 export const rimUniforms = { uRimCol: { value: new Color(0, 0, 0) }, uRimK: { value: 0.0 } };
 export const GLSL_RIM_DECL = 'uniform vec3 uRimCol; uniform float uRimK;';

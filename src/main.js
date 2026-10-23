@@ -10,7 +10,7 @@ import { createStacks, createFlag, createTeeMarkers, createTeePeg, createBall, c
 import { createRock } from './rock.js';
 import { windUniforms, createGrass, createTrees, createShrubs, createFlowers, createIcePlant, createBeachRocks, createDriftwood } from './vegetation.js';
 import { createBoats, createWisps, createMist } from './atmos.js';
-import { rimUniforms } from './noise.js';
+import { rimUniforms, tameUniforms } from './noise.js';
 import { Ball, BALL_R, CLUBS, SURF, predict } from './physics.js';
 import { Ribbon, groundLine, createMarker, Particles, puff, confetti } from './fx.js';
 import { QUALITY, createPost } from './post.js';
@@ -32,6 +32,7 @@ const canvas = $('scene');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.info.autoReset = false;   // count every pass of the frame, not just the last one
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
 
 const scene = new THREE.Scene();
@@ -81,10 +82,10 @@ async function build() {
   W0.wisps = createWisps(touch ? 45 : 70); scene.add(W0.wisps.points);
   W0.mist = createMist(depthTex, BOUNDS); scene.add(W0.mist.group);
   // aviation beacons on the stacks
-  W0.beacons = [];
   const bmat = new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 0.3, 0.2), fog: false });
-  for (const [x, z] of STACKS) { const b = new THREE.Mesh(new THREE.SphereGeometry(1.4, 8, 6), bmat); b.position.set(x, heightAt(x, z) + 137.5, z); scene.add(b); W0.beacons.push(b); }
-  W0.bmat = bmat;
+  W0.beacons = new THREE.InstancedMesh(new THREE.SphereGeometry(1.4, 8, 6), bmat, STACKS.length * 2);
+  STACKS.forEach(([x, z], i) => { for (const [j, y, r] of [[0, 137.5, 1], [1, 72, 0.8]]) W0.beacons.setMatrixAt(i * 2 + j, new THREE.Matrix4().compose(new V3(x, heightAt(x, z) + y, z), new THREE.Quaternion(), new V3(r, r, r))); });
+  scene.add(W0.beacons); W0.bmat = bmat;
   W0.flag = createFlag(); scene.add(W0.flag.group);
   scene.add(createTeeMarkers());
   W0.peg = createTeePeg(); scene.add(W0.peg);
@@ -94,7 +95,7 @@ async function build() {
   W0.grass = createGrass(W0.grassMax); W0.grassMax = W0.grass.count; scene.add(W0.grass);
   W0.scatter = { flowers: createFlowers(touch ? 2600 : 5000), ice: createIcePlant(touch ? 1400 : 2600), rocks: createBeachRocks(touch ? 260 : 420), drift: createDriftwood(40), shrubs: createShrubs(touch ? 700 : 1100) };
   for (const m of Object.values(W0.scatter)) scene.add(m);
-  W0.trees = createTrees(touch ? 'med' : 'high'); scene.add(W0.trees);
+  W0.trees = createTrees(); scene.add(W0.trees);
   // ball, effects
   W0.ballMesh = createBall(); scene.add(W0.ballMesh);
   W0.tracer = new Ribbon(260, 0xf2fbfa, 0.6, 0.003, 0.016); scene.add(W0.tracer.mesh);
@@ -127,25 +128,27 @@ function applyLook() {
   if (!timeOverride) simDate = new Date();
   const sp = sunPosition(simDate), el = sp.elevation * Math.PI / 180, az = (sp.azimuth - HEADING) * Math.PI / 180;
   sunDir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)).normalize();
-  const mel = 0.4, maz = -0.7;   // art-directed: the moon hangs front-left over the bay so its path lies on the water
+  const mel = 0.3, maz = -0.4;   // art-directed: the moon hangs front-left of the rock from the tee, so its path lies on the water
   moonDir.set(Math.sin(maz) * Math.cos(mel), Math.sin(mel), -Math.cos(maz) * Math.cos(mel)).normalize();
   look = lookFor(sp.elevation, weather);
   const night = THREE.MathUtils.smoothstep(-sp.elevation, 2, 9); // 0 day → 1 night
   look.nightK = night; look.elev = sp.elevation;
   hemi.color.copy(look.hemiS); hemi.groundColor.copy(look.hemiG); hemi.intensity = look.hemiI * 0.78 * (1 + night * 0.15) * (1 + Math.max(0, Math.min(1, 1 - sp.elevation / 12)) * 0.7 * (1 - night));
-  if (night > 0.5) { sun.color.set(0xa9c0ff); sun.intensity = 1.0 * (1 - weather.cloud / 180); W0.lightDir = moonDir; }
+  if (night > 0.5) { sun.color.set(0xa4bcff); sun.intensity = 2.1 * (1 - weather.cloud / 170); W0.lightDir = moonDir; }
   else { sun.color.copy(look.sun); sun.intensity = Math.max(0.05, look.sunI * 0.8); W0.lightDir = sunDir; }
   const fogC = look.hor.clone();
   scene.fog.color.copy(fogC);
   const base = Math.min(0.0022, Math.max(0.00042, 1.4 / Math.max(300, weather.visibility)));
   scene.fog.density = THREE.MathUtils.lerp(base, 0.0024, weather.fogFactor * 0.85);
   renderer.toneMappingExposure = look.exp * (1 + night * 0.2);
-  if (post && post.grade) post.grade.uniforms.uSat.value = 1.14 - night * 0.32;
+  // grade: moonlight is desaturated with lifted blue shadows; bloom only catches the moon, lights and glints at night
+  gradeState.sat = 1.12 - night * 0.36; gradeState.lift.set(0.004, 0.011, 0.03).multiplyScalar(night);
+  gradeState.bloomS = night > 0.5 ? 0.55 : 0.36; gradeState.bloomT = night > 0.5 ? 0.75 : 1.0;
   // fill: opposite the key, warm at golden hour so the foreground reads gold rather than dark
   const low = night > 0.5 ? 0 : 1 - THREE.MathUtils.smoothstep(sp.elevation, 2, 22);
   W0.low = low; W0.night = night;
   fill.position.set(-sunDir.x, 0.6, -sunDir.z).normalize().multiplyScalar(100); fill.target.position.set(0, 0, 0);
-  if (night > 0.5) { fill.color.set(0x7088c0); fill.intensity = 0.25; }
+  if (night > 0.5) { fill.color.set(0x7c94cc); fill.intensity = 0.55; }
   else { fill.color.copy(look.hor).lerp(new THREE.Color(0xffc08a), low * 0.6); fill.intensity = 0.25 + low * 0.75; }
   W0.mist.uniforms.uCol.value.copy(look.hor).lerp(new THREE.Color(1, 1, 1), 0.35);
   const morning = night < 0.5 && sp.azimuth < 180 && sp.elevation < 22 ? 1 : 0;
@@ -157,7 +160,7 @@ function applyLook() {
   s.uNight.value = night; s.uCloud.value = look.cloud; s.uFog.value = look.fog;
   const w = W0.water.uniforms;
   w.uSunDir.value.copy(night > 0.5 ? moonDir : sunDir); w.uSunCol.value.copy(night > 0.5 ? new THREE.Color(0x9fb4ff) : look.sun);
-  w.uSunI.value = night > 0.5 ? 0.9 * (1 - weather.cloud / 140) : look.sunI; w.uZen.value.copy(look.zen); w.uHor.value.copy(look.hor);
+  w.uSunI.value = night > 0.5 ? 0.75 * (1 - weather.cloud / 140) : look.sunI; w.uZen.value.copy(look.zen); w.uHor.value.copy(look.hor);
   w.uFogColor.value.copy(fogC); w.uFogDensity.value = scene.fog.density; w.uNight.value = night; w.uLow.value = night > 0.5 ? 0.7 : low;
   const ms = weather.windMph * 0.44704, wl = Math.hypot(weather.wind.x, weather.wind.z) || 1;
   const strength = Math.min(1.3, Math.max(0.15, ms / 8));
@@ -167,6 +170,9 @@ function applyLook() {
   W0.flag.uniforms.uWind.value = Math.min(1.2, ms / 9);
   W0.gulls.visible = night < 0.5 && weather.fogFactor < 0.8;
   W0.ballMesh.material.emissive.set(night > 0.5 ? 0x9fe8e8 : 0x334044); W0.ballMesh.material.emissiveIntensity = night > 0.5 ? 1.4 : 0.25;
+  // warm low sun: pull the rock and foliage back toward natural colours; distant trees fade into the haze
+  tameUniforms.uTame.value = low * (1 - night); tameUniforms.uRelief.value = 1 - low * 0.45 - (night > 0.5 ? 0.4 : 0); tameUniforms.uAerial.value = night > 0.5 ? 0.12 : 0.22 + weather.fogFactor * 0.2;
+  applyGrade();
   // HUD
   const clock = laClock(simDate);
   let phase = look.elev < -6 ? 'Moonlit night' : look.elev < 0 ? 'Twilight' : look.elev < 9 ? (sp.azimuth > 180 ? 'Golden hour' : 'Sunrise') : weather.fogFactor > 0.4 ? 'Marine layer' : sp.azimuth < 180 && look.elev < 30 ? 'Morning' : 'Daylight';
@@ -177,16 +183,24 @@ function applyLook() {
   $('time-text').textContent = `${phase} · ${clock} PT${timeOverride ? ' (preview)' : ''}`;
 }
 
+const gradeState = { sat: 1.12, lift: new V3(), bloomS: 0.36, bloomT: 1.0 };
+function applyGrade() {
+  if (!post) return;
+  if (post.grade) { post.grade.uniforms.uSat.value = gradeState.sat; post.grade.uniforms.uLift.value.copy(gradeState.lift); }
+  if (post.bloom) { post.bloom.strength = gradeState.bloomS; post.bloom.threshold = gradeState.bloomT; }
+}
+
 // ---------- quality ----------
 function setQuality(level, persist = true) {
   qLevel = level; const q = QUALITY[level];
   dpr = Math.min(window.devicePixelRatio || 1, q.dpr);
   renderer.setPixelRatio(dpr); renderer.setSize(W, H, false);
   if (post) post.dispose();
-  post = createPost(renderer, scene, camera, level, W, H, dpr);
+  post = createPost(renderer, scene, camera, level, W, H, dpr); applyGrade();
   sun.shadow.mapSize.set(q.shadow, q.shadow); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
   if (W0.grass) W0.grass.count = Math.floor(W0.grassMax * q.grass);
   if (W0.scatter) for (const [k, m] of Object.entries(W0.scatter)) { m.count = Math.floor(m.userData.max * q[k]); m.visible = m.count > 0; }
+  if (W0.trees) W0.trees.userData.setQuality(level);
   const cap = level[0].toUpperCase() + level.slice(1);
   $('q-label').textContent = qMode === 'auto' ? 'Auto' : cap; $('q-level').textContent = qMode === 'auto' ? ` · ${cap}` : '';
   if (persist) localStorage.setItem('cg-quality', qMode);
@@ -196,6 +210,7 @@ function resize() {
   W = window.innerWidth; H = window.innerHeight;
   camera.aspect = W / H; camera.fov = W < H ? 62 : 48; camera.updateProjectionMatrix();
   renderer.setSize(W, H, false); if (post) post.setSize(W, H);
+  if (W0.trees) W0.trees.userData.frame(W < H);
   const focal = H / (2 * Math.tan(camera.fov * Math.PI / 360)) * (renderer.getPixelRatio() || 1);
   if (W0.parts) W0.parts.mat.uniforms.uScale.value = focal * 0.21; if (W0.wisps) W0.wisps.uniforms.uScale.value = focal * 0.42;
 }
@@ -219,7 +234,7 @@ function setClub(c, manual = false) {
 }
 function aimPose(club = G.club, yaw = G.yaw) {
   const putt = club === 'putter', p = ball.p;
-  const dist = putt ? 3.4 : club === 'iron' ? 7 : 8, h = putt ? 1.2 : club === 'iron' ? 2.3 : 2.5;
+  const dist = putt ? 3.4 : club === 'iron' ? 7 : 8.5, h = putt ? 1.2 : club === 'iron' ? 2.3 : 2.7;
   const dx = Math.sin(yaw), dz = -Math.cos(yaw);
   const cx = p.x - dx * dist, cz = p.z - dz * dist;
   const pos = new V3(cx, Math.max(p.y, heightAt(cx, cz) + 0.6, 0.6) + h, cz);
@@ -240,7 +255,7 @@ function prepareShot(dur = 1.6) {
 }
 function resetHole() {
   ball.place(TEE.x, TEE.z); ball.p.y += 0.035;
-  Object.assign(G, { strokes: 0, putts: 0, longest: 0, penalties: 0, manualClub: false, timeScale: 1 });
+  Object.assign(G, { strokes: 0, putts: 0, longest: 0, penalties: 0, manualClub: false, timeScale: 1, holeT0: null });
   W0.tracer.clear(); W0.tracer.fade = 0; W0.marker.visible = false; W0.aimLine.set([]);
   $('endcard').hidden = true; $('banner').hidden = true;
   updateHud();
@@ -309,7 +324,7 @@ function dropPoint() {
 const SCORE_NAMES = { '-3': 'Albatross', '-2': 'Eagle', '-1': 'Birdie', 0: 'Par', 1: 'Bogey', 2: 'Double bogey', 3: 'Triple bogey' };
 function relText(n) { return n === 0 ? 'E' : n > 0 ? `+${n}` : `${n}`; }
 function holeOut() {
-  G.state = 'holed'; G.t = 0; G.timeScale = 0.35;
+  G.state = 'holed'; G.t = 0; G.timeScale = 0.35; G.holeT0 = elapsed;
   audio.rattle();
   confetti(W0.parts, cupPos());
   const rel = G.strokes - PAR;
@@ -320,7 +335,7 @@ function holeOut() {
   updateHud();
 }
 function showEnd() {
-  G.state = 'end';
+  G.state = 'end'; if (G.holeT0 == null) G.holeT0 = elapsed - 3.2;
   const rel = G.strokes - PAR;
   $('banner').hidden = true;
   $('end-name').textContent = G.strokes === 1 ? 'Hole in one' : (SCORE_NAMES[rel] ?? relText(rel));
@@ -492,7 +507,7 @@ let last = performance.now(), elapsed = 0, lookTimer = 0;
 function frame(now) {
   const rdt = Math.min(0.05, (now - last) / 1000); last = now;
   if (G.state !== 'loading') trackPerf(now);
-  const a = performance.now(); update(rdt); const b = performance.now(); post.render(); const c = performance.now();
+  const a = performance.now(); update(rdt); const b = performance.now(); renderer.info.reset(); post.render(); const c = performance.now();
   perf.upd = perf.upd * 0.95 + (b - a) * 0.05; perf.ren = perf.ren * 0.95 + (c - b) * 0.05;
 }
 function update(rdt) {
@@ -501,12 +516,13 @@ function update(rdt) {
   W0.gulls.userData.update(elapsed); W0.boats.userData.update(elapsed);
   W0.wisps.uniforms.uTime.value = elapsed; W0.mist.uniforms.uTime.value = elapsed;
   // the pin is pulled on hole-out so the flagstick never blocks the celebration shot
-  { const fg = W0.flag.group, ud = fg.userData; if (ud.y0 === undefined) ud.y0 = fg.position.y;
+  { const pin = W0.flag.pin, ud = pin.userData;
     ud.pull = (G.state === 'holed' || G.state === 'end') ? Math.min(1, (ud.pull || 0) + rdt * 1.4) : 0;
-    fg.position.y = ud.y0 + ud.pull * ud.pull * 4; fg.visible = ud.pull < 0.97; }
-  // rim light: strongest when looking toward a low sun
-  { const f = camera.getWorldDirection(tmp); const k = Math.max(0, (f.x * sunDir.x + f.z * sunDir.z) / (Math.hypot(sunDir.x, sunDir.z) || 1));
-    rimUniforms.uRimCol.value.copy(sun.color).multiplyScalar((0.12 + k * k * 0.9) * (0.3 + W0.low) * (1 - W0.night) * Math.min(1.2, sun.intensity)); rimUniforms.uRimK.value = 1; }
+    pin.position.y = ud.pull * ud.pull * 4; pin.rotation.z = ud.pull * 0.25; pin.visible = ud.pull < 0.97; }
+  // rim light: strongest when looking toward a low sun (or the moon, cooler and softer)
+  { const f = camera.getWorldDirection(tmp), ld = W0.lightDir, k = Math.max(0, (f.x * ld.x + f.z * ld.z) / (Math.hypot(ld.x, ld.z) || 1));
+    const amt = W0.night > 0.5 ? (0.1 + k * k * 0.6) * 0.45 : (0.12 + k * k * 0.9) * (0.3 + W0.low);
+    rimUniforms.uRimCol.value.copy(sun.color).multiplyScalar(amt * Math.min(1.2, sun.intensity)); rimUniforms.uRimK.value = 1; }
   W0.bmat.color.setRGB(4 * (0.25 + 0.75 * (Math.sin(elapsed * 2.2) > 0.6 ? 1 : 0.15)), 0.25, 0.2);
   lookTimer += rdt; if (lookTimer > 30) { lookTimer = 0; applyLook(); }
 
@@ -563,7 +579,10 @@ function update(rdt) {
   const r = Math.max(BALL_R * 1.5, bd * 0.0045);
   bm.scale.setScalar(r); bm.position.set(ball.p.x, ball.p.y - BALL_R + r * (ball.state === 'flight' ? 1 : 0.92) + (ball.state === 'rest' ? meshOffset() : 0), ball.p.z);
   bm.visible = ball.state !== 'holed' && ball.state !== 'water' || G.state === 'flight';
-  if (ball.state === 'holed') { bm.visible = G.t < 0.25; bm.position.y -= G.t * 0.4; }
+  if (ball.state === 'holed') {
+    const c = cupPos(), k = Math.min(1, G.t / 0.18);
+    bm.visible = G.t < 0.8; bm.position.x += (c.x - bm.position.x) * k; bm.position.z += (c.z - bm.position.z) * k; bm.position.y -= Math.min(0.2, G.t * 0.5);
+  }
   const onPeg = ball.lie === 'tee' && ball.state === 'rest' && G.strokes === 0;
   W0.peg.visible = onPeg; if (onPeg) { W0.peg.scale.setScalar(r * 0.42); W0.peg.position.set(ball.p.x, bm.position.y - r * 0.98, ball.p.z); }
 
@@ -602,15 +621,14 @@ function updateCamera(rdt, dt) {
   }
   const p = ball.p;
   if (G.state === 'flight' || G.state === 'water' || G.state === 'holed') {
-    if (G.slowmo || G.state === 'holed') {
-      // low camera at the cup
+    if (G.state === 'holed') {
+      cupShot(elapsed - G.holeT0);
+      camera.position.lerp(cup.pos, damp(3, rdt)); cam.look.lerp(cup.look, damp(4, rdt));
+    } else if (G.slowmo) {
       // low and off to the side so the cup sits left of centre and the flagstick never blocks the drop
       const c = cupPos(), d = cam.dir, px = -d.y, pz = d.x;
-      const hl = G.state === 'holed';
-      const back = hl ? 3.2 + G.t * 0.9 : 1.8, side = hl ? 2.0 + G.t * 0.4 : 0.9;
-      const want = new V3(c.x - d.x * back + px * side, c.y + (hl ? 1.35 + G.t * 0.45 : 0.34), c.z - d.y * back + pz * side);
-      camera.position.lerp(want, damp(hl ? 2.2 : 4, rdt));
-      cam.look.lerp(tmp.set(c.x - px * (hl ? 1.6 : 0.55) + d.x * (hl ? 1.5 : 0), c.y + (hl ? 0.9 + G.t * 0.25 : 0.12), c.z - pz * (hl ? 1.6 : 0.55) + d.y * (hl ? 1.5 : 0)), damp(5, rdt));
+      camera.position.lerp(tmp.set(c.x - d.x * 1.8 + px * 0.9, c.y + 0.34, c.z - d.y * 1.8 + pz * 0.9), damp(4, rdt));
+      cam.look.lerp(tmp.set(c.x - px * 0.55, c.y + 0.12, c.z - pz * 0.55), damp(5, rdt));
     } else if (G.state === 'flight') {
       const hv = Math.hypot(ball.v.x, ball.v.z);
       if (hv > 0.5) { cam.dir.lerp(new THREE.Vector2(ball.v.x / hv, ball.v.z / hv), damp(2, rdt)).normalize(); }
@@ -627,12 +645,26 @@ function updateCamera(rdt, dt) {
     return;
   }
   if (G.state === 'end') {
-    const c = cupPos(), a = elapsed * 0.08;
-    camera.position.lerp(tmp.set(c.x + Math.sin(a) * 9, c.y + 3.2, c.z + Math.cos(a) * 9), damp(0.8, rdt));
-    cam.look.lerp(tmp.set(c.x, c.y + 1, c.z), damp(2, rdt)); camera.lookAt(cam.look);
+    cupShot(elapsed - G.holeT0);
+    camera.position.lerp(cup.pos, damp(1.5, rdt)); cam.look.lerp(cup.look, damp(2, rdt)); camera.lookAt(cam.look);
     return;
   }
   camera.lookAt(cam.look);
+}
+
+// hole-out framing: ~3 m from the cup and ~1.2 m up, looking a touch down so the cup sits in the lower-left third
+// with Morro Rock filling the upper background, then a slow push-out and rise (continues under the end card)
+const cup = { pos: new V3(), look: new V3() };
+function cupShot(t) {
+  const c = cupPos(), tanV = Math.tan(camera.fov * Math.PI / 360), tanH = tanV * camera.aspect;
+  const te = Math.max(0, t - 3.2);
+  const D = 3.1 + Math.min(t, 3.2) * 0.2 + Math.min(te, 14) * 0.38, h = 1.2 + Math.min(t, 3.2) * 0.06 + Math.min(te, 14) * 0.12;
+  const ax = Math.atan(0.45 * tanH), ay = Math.atan(0.6 * tanV);            // cup at NDC (-0.45, -0.6)
+  const psi = Math.atan2(ROCK.x - 10 - c.x, -(ROCK.z - c.z)) + te * 0.012;  // face the rock's summit, drifting slowly
+  const cy = psi - ax, hd = Math.sqrt(D * D - h * h);
+  cup.pos.set(c.x - Math.sin(cy) * hd, c.y + h, c.z + Math.cos(cy) * hd);
+  const pitch = ay - Math.atan2(h, hd);
+  cup.look.set(cup.pos.x + Math.sin(psi) * Math.cos(pitch) * 10, cup.pos.y + Math.sin(pitch) * 10, cup.pos.z - Math.cos(psi) * Math.cos(pitch) * 10);
 }
 
 function updatePin() {

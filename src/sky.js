@@ -48,14 +48,18 @@ export function createSky() {
         // high wispy cirrus
         vec2 b2 = vec2(cp.x * 0.25 + cp.y * 0.1, cp.y * 1.4 - cp.x * 0.2) * 0.6 + drift * 1.6;
         float c2 = smoothstep(0.55, 0.85, fbm(b2 * 1.3 + 5.0)) * 0.45 * (1.0 - cov * 0.5);
-        if (uNight > 0.5) { cloudC = mix(uHor * 1.25, vec3(0.32, 0.36, 0.45), 0.25); litC = cloudC; }
-        float hfade = smoothstep(0.0, 0.14, y);
+        float mdc = max(dot(d, normalize(uMoonDir)), 0.0);
+        if (uNight > 0.5) {   // moonlit clouds: dim blue-grey bodies, silver edges toward the moon
+          cloudC = mix(uHor * 1.3, vec3(0.3, 0.34, 0.44), 0.3) * (0.75 + 0.5 * lit) + vec3(0.55, 0.6, 0.72) * pow(mdc, 10.0) * (0.25 + 0.6 * (1.0 - c1));
+          litC = cloudC;
+        }
+        float hfade = smoothstep(0.0, 0.14 + uFog * 0.3, y);                    // in a marine layer the clouds melt into the haze
         col = mix(col, mix(litC, uSunCol, low * 0.4), c2 * hfade * day);
         col = mix(col, cloudC, c1 * hfade * 0.95);
         float cloudAll = max(c1, c2) * hfade;
         // sun: glow and a disc that swells near the horizon (blooms)
         float vis = smoothstep(-0.02, 0.01, y) * (1.0 - uFog * 0.85);
-        float glow = pow(sdp, 18.0) * 0.5 + pow(sdp, 220.0) * 1.8;
+        float glow = pow(sdp, 18.0) * 0.38 + pow(sdp, 220.0) * 1.5;
         float rad = mix(0.0105, 0.02, low);
         float disc = smoothstep(cos(rad), cos(rad * 0.82), sd);
         col += uSunCol * (glow * (0.5 + low) * (1.0 - c1 * 0.6) + disc * 22.0 * (1.0 - c1 * 0.9)) * day * vis;
@@ -68,8 +72,11 @@ export function createSky() {
           col += vec3(0.25, 0.28, 0.4) * smoothstep(0.65, 0.9, fbm(vec2(d.x * 3.0 + d.z, d.z * 1.2) * 2.0)) * 0.05 * uNight * smoothstep(0.1, 0.6, d.y);
           float md = max(dot(d, normalize(uMoonDir)), 0.0);
           float moon = smoothstep(0.99955, 0.99972, md);
-          col += vec3(0.92, 0.94, 1.0) * (moon * (5.0 - 2.0 * cgN2(d.xz * 900.0)) + pow(md, 90.0) * 0.25 + pow(md, 8.0) * 0.06) * uNight;
+          float maria = cgN2(d.xz * 260.0) * 0.6 + cgN2(d.xz * 900.0) * 0.4;      // a hint of the darker maria
+          col += vec3(0.92, 0.94, 1.0) * (moon * (6.0 - 2.6 * maria) * (1.0 - cloudAll * 0.7) + pow(md, 90.0) * 0.3 + pow(md, 8.0) * 0.08) * uNight;
+          col += vec3(0.1, 0.13, 0.22) * pow(md, 2.5) * 0.35 * uNight;              // the sky brightens toward the moon
         }
+        col = mix(col, uHor, (1.0 - smoothstep(-0.02, 0.22, y)) * uFog * 0.85);  // fogged hills sit in matching haze
         col += (cgH2(gl_FragCoord.xy) - 0.5) / 255.0;
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>

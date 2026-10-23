@@ -65,19 +65,26 @@ export function createWater({ depthTex, bounds, segments }) {
         body = mix(body, uSandy, exp(-dd * 1.4) * 0.8);
         float sunLit = 0.55 + 0.45 * max(dot(N, normalize(L + vec3(0.0, 0.4, 0.0))), 0.0);
         body *= sunLit * mix(1.0, 0.16, uNight) * mix(1.0, 0.7, uLow);
-        // light through wave crests in the shallows
+        // light through wave crests in the shallows, and caustics dancing on the sand just off the beach
         body += uShallow * max(sl.x + sl.y, 0.0) * 0.5 * exp(-dd * 0.25) * (1.0 - uNight);
+        vec2 cq = vW.xz * 0.9 + sl * 2.0;
+        float cau = pow(1.0 - abs(cgN2(cq + uTime * 0.35) - cgN2(cq * 1.3 - uTime * 0.28)), 6.0);
+        body += vec3(0.55, 0.75, 0.62) * cau * 0.35 * smoothstep(2.2, 0.3, dd) * smoothstep(0.05, 0.4, dd) * detail * (1.0 - uNight) * (0.4 + uSunI * 0.2);
         vec3 col = mix(body, sky, fres * 0.9);
         // glints: a tight sparkle, a broader sheen, and a wide glitter path when the sun or moon is low
         float rl = max(dot(R, L), 0.0);
-        float sparkle = step(0.72, cgN2(vW.xz * 2.3 + uTime * 1.3)) * pow(rl, 900.0) * 140.0;
-        float spec = pow(rl, 260.0) * 14.0 + pow(rl, 40.0) * 0.35 + sparkle * detail;
-        spec += pow(rl, 14.0) * uLow * 1.1 * (0.6 + 0.8 * cgN2(vW.xz * 0.9 + uTime));
+        float sparkle = step(0.72, cgN2(vW.xz * 2.3 + uTime * 1.3)) * pow(rl, 900.0) * mix(140.0, 10.0, uNight);
+        float spec = pow(rl, 260.0) * mix(14.0, 1.6, uNight) + pow(rl, 40.0) * 0.35 + sparkle * detail;
+        // the wide glitter path; by moonlight it breaks into a shimmer of small flecks instead of a solid streak
+        float fleck = mix(1.0, 0.15 + 1.3 * step(0.58, cgN2(vW.xz * vec2(2.6, 1.1) + uTime * vec2(0.9, 0.4))), uNight);
+        spec += pow(rl, 14.0) * uLow * 1.1 * (0.6 + 0.8 * cgN2(vW.xz * 0.9 + uTime)) * fleck;
         col += uSunCol * spec * uSunI * step(0.0, L.y);
         // surf: bands rolling toward the beach and a bright lip at the waterline
         float fn = cgN2(vW.xz * 0.35 + uTime * 0.25) * 0.6 + cgN2(vW.xz * 1.3 - uTime * 0.4) * 0.4;
-        float roll = depth * 3.6 + uTime * 1.5 + fn * 2.5;
-        float band = smoothstep(0.75, 0.98, sin(roll) * 0.5 + 0.5) * smoothstep(2.4, 0.25, depth);
+        // foam lines: a sharp leading edge rolling toward the beach with a soft, broken trail behind it
+        float roll = (depth * 3.6 + uTime * 1.5 + fn * 2.5) / 6.2832;
+        float ph = fract(roll);
+        float band = smoothstep(0.0, 0.05, ph) * (1.0 - smoothstep(0.05, 0.42, ph)) * smoothstep(0.3, 0.6, fn + 0.25) * smoothstep(2.4, 0.25, depth);
         float lip = smoothstep(0.5, 0.04, depth + (fn - 0.5) * 0.3);
         float lace = smoothstep(0.45, 0.75, cgN2(vW.xz * 2.2 + uTime * 0.3)) * smoothstep(1.2, 0.2, depth);
         float foam = clamp(max(max(band * 0.85, lip), lace * 0.45) * (0.55 + 0.65 * fn), 0.0, 1.0) * inside;

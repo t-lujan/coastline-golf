@@ -13,11 +13,11 @@ One signature par 4 on the San Luis Obispo coast, built with three.js. You tee o
 - **Real time of day.** The solar position for Morro Rock at the current `America/Los_Angeles` time drives the sun, sky, fog colour and exposure: morning haze, midday, golden hour, then a moonlit night.
 - **Rendering**
   - Custom GLSL water: analytic waves, fresnel sky reflection, sun glints and shoreline foam from a baked depth map.
-  - Gradient sky with sun glow, clouds, stars and moon.
+  - Gradient sky with sun glow, layered clouds, stars and a moon with a glitter path on the bay.
   - Low-poly terrain painted from baked distance fields: fairway stripes, green checkerboard, bunkers with lips, dunes and beach.
-  - Instanced, vertex-shader wind-swayed dune grass and Monterey cypress.
+  - Instanced, wind-swayed dune grass, coastal scrub and the Morro Bay tree mix: Monterey pine, blue-gum eucalyptus, coast live oak and a few windswept cypress, with soft contact shadows.
   - Shadows, bloom, ACES tone mapping, a light grade with vignette, and SMAA or FXAA.
-- **Adaptive quality.** Auto mode measures the frame rate and steps from High to Medium to Low (DPR, bloom, anti-aliasing, shadow size, grass density). Or pick a level from the HUD.
+- **Adaptive quality.** Auto mode measures the frame rate and steps from High to Medium to Low (DPR, bloom, anti-aliasing, shadow size, grass, scatter and tree counts). Or pick a level from the HUD.
 - **Golf physics**
   - Quadratic drag, backspin lift and wind drift scaled by height.
   - Per-surface bounce and rolling friction, with gravity along the slope of the green.

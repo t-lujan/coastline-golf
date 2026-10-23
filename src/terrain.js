@@ -22,14 +22,27 @@ function bakePaint(res) {
 }
 
 export function bakeDepth(res = 256) {
-  const data = new Uint8Array(res * res * 4);
+  // R: water depth (0..14 m). G: land height (0..32 m), box-blurred over ~15 m so the mist can fade out softly
+  // wherever the ground (or the rock) rises toward it instead of cutting a hard line through the terrain.
+  const data = new Uint8Array(res * res * 4), land = new Float32Array(res * res);
   for (let j = 0; j < res; j++) for (let i = 0; i < res; i++) {
     const x = BOUNDS.minX + (i + 0.5) / res * (BOUNDS.maxX - BOUNDS.minX), z = BOUNDS.minZ + (j + 0.5) / res * (BOUNDS.maxZ - BOUNDS.minZ);
     let h = heightAt(x, z);
     const rr = Math.hypot((x - ROCK.x) / ROCK.rx, (z - ROCK.z) / ROCK.rz); if (rr < 1.02) h = Math.max(h, 2);
     const k = (j * res + i) * 4, v = Math.max(0, Math.min(255, Math.round(-h / 14 * 255)));
-    data[k] = v; data[k + 1] = v; data[k + 2] = v; data[k + 3] = 255;
+    data[k] = v; data[k + 2] = v; data[k + 3] = 255;
+    land[j * res + i] = rr < 1.18 ? 32 : Math.max(0, h);   // the rock's waterline bulge and boulders reach past its ellipse
   }
+  const R = 6, tmp = new Float32Array(res * res);
+  for (let pass = 0; pass < 2; pass++) {
+    const src = pass ? tmp : land, dst = pass ? land : tmp;
+    for (let j = 0; j < res; j++) for (let i = 0; i < res; i++) {
+      let sum = 0, n = 0;
+      for (let o = -R; o <= R; o++) { const ii = pass ? i : Math.min(res - 1, Math.max(0, i + o)), jj = pass ? Math.min(res - 1, Math.max(0, j + o)) : j; sum += src[jj * res + ii]; n++; }
+      dst[j * res + i] = sum / n;
+    }
+  }
+  for (let q = 0; q < res * res; q++) data[q * 4 + 1] = Math.min(255, Math.round(land[q] / 32 * 255));
   const tex = new THREE.DataTexture(data, res, res, THREE.RGBAFormat);
   tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter; tex.needsUpdate = true;
   return tex;

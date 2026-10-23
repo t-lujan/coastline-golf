@@ -67,8 +67,10 @@ export function createMist(depthTex, bounds) {
       uniform float uTime, uAmt; uniform vec3 uCol; uniform sampler2D uDepth; uniform vec4 uBounds; varying vec3 vW;
       void main(){
         vec2 uv = (vW.xz - uBounds.xy) / uBounds.zw;
-        float d = texture2D(uDepth, uv).r * 14.0;
+        vec4 T = texture2D(uDepth, uv);
+        float d = T.r * 14.0, ground = T.g * 32.0;
         float overWater = smoothstep(0.0, 1.5, d) + 0.35;
+        overWater *= smoothstep(-0.6, 2.2, vW.y - ground);                     // thin out where land or the rock rises into it
         vec2 p = vW.xz * 0.012 + vec2(uTime * 0.006, uTime * 0.002);
         float n = cgN2(p) * 0.6 + cgN2(p * 2.7 + 3.0) * 0.3 + cgN2(p * 7.0) * 0.1;
         float dist = length(cameraPosition - vW);

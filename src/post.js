@@ -12,19 +12,21 @@ const touch = typeof matchMedia !== 'undefined' && (matchMedia('(pointer: coarse
 export const QUALITY = {
   high: { dpr: 2, bloom: true, bloomScale: touch ? 0.5 : 1, aa: touch ? 'fxaa' : 'smaa', shadow: 2048, grass: 1, post: true, flowers: 1, ice: 1, rocks: 1, drift: 1, shrubs: 1 },
   med:  { dpr: 1.5, bloom: true, bloomScale: 0.5, aa: 'fxaa', shadow: 1024, grass: 0.6, post: true, flowers: 0.45, ice: 0.6, rocks: 0.6, drift: 1, shrubs: 0.7 },
-  low:  { dpr: 1, bloom: false, aa: 'none', shadow: 512, grass: 0.35, post: false, flowers: 0, ice: 0.3, rocks: 0.35, drift: 0.5, shrubs: 0.4 },
+  // low keeps the cheap grade pass (no bloom, no AA) so it still matches the look of the other tiers
+  low:  { dpr: 1, bloom: false, aa: 'none', shadow: 512, grass: 0.35, post: true, flowers: 0, ice: 0.3, rocks: 0.35, drift: 0.5, shrubs: 0.4 },
 };
 
 const GradeShader = {
-  uniforms: { tDiffuse: { value: null }, uVig: { value: 0.28 }, uSat: { value: 1.14 }, uContrast: { value: 0.16 },
+  uniforms: { tDiffuse: { value: null }, uVig: { value: 0.28 }, uSat: { value: 1.12 }, uContrast: { value: 0.16 }, uLift: { value: new THREE.Vector3() },
     uShadowTint: { value: new THREE.Vector3(-0.012, 0.004, 0.02) }, uHighTint: { value: new THREE.Vector3(0.018, 0.008, -0.012) } },
   vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-  fragmentShader: `uniform sampler2D tDiffuse; uniform float uVig, uSat, uContrast; uniform vec3 uShadowTint, uHighTint; varying vec2 vUv;
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float uVig, uSat, uContrast; uniform vec3 uShadowTint, uHighTint, uLift; varying vec2 vUv;
     void main(){ vec4 c = texture2D(tDiffuse, vUv); vec3 col = c.rgb;
       float l = dot(col, vec3(0.299, 0.587, 0.114));
       col = mix(vec3(l), col, uSat);
       col = mix(col, col * col * (3.0 - 2.0 * col), uContrast);                 // gentle S-curve
       col += uShadowTint * (1.0 - smoothstep(0.0, 0.5, l)) + uHighTint * smoothstep(0.5, 1.0, l);
+      col += uLift * (1.0 - smoothstep(0.0, 0.4, l));                            // lifted (moonlit) shadows
       vec2 d = vUv - 0.5; float v = smoothstep(0.85, 0.2, length(d * vec2(1.0, 0.85)) * 1.25); col *= mix(1.0 - uVig, 1.0, v);
       gl_FragColor = vec4(clamp(col, 0.0, 1.0), c.a); }`,
 };

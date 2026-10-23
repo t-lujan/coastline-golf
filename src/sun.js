@@ -41,7 +41,7 @@ export function laClock(date) {
 const C = (h) => new Color(h);
 // key frames by sun elevation (degrees)
 const KEYS = [
-  { el: -18, zen: C('#040917'), hor: C('#13203d'), sun: C('#9fb4ff'), sunI: 0.0, hemiS: C('#3a4f86'), hemiG: C('#10141f'), hemiI: 0.5, exp: 0.95 },
+  { el: -18, zen: C('#06112c'), hor: C('#1b2c52'), sun: C('#9fb4ff'), sunI: 0.0, hemiS: C('#5a76b0'), hemiG: C('#1c2434'), hemiI: 0.95, exp: 1.12 },
   { el: -6, zen: C('#101a3a'), hor: C('#4c3d5e'), sun: C('#ff8a5c'), sunI: 0.0, hemiS: C('#5d5a8a'), hemiG: C('#211a22'), hemiI: 0.6, exp: 1.0 },
   { el: 0, zen: C('#22356c'), hor: C('#f2925c'), sun: C('#ff7f3a'), sunI: 1.3, hemiS: C('#c99a8a'), hemiG: C('#5a3a26'), hemiI: 0.95, exp: 1.05 },
   { el: 6, zen: C('#2c5598'), hor: C('#f4b27a'), sun: C('#ffad62'), sunI: 2.5, hemiS: C('#e2b89a'), hemiG: C('#6a5232'), hemiI: 1.0, exp: 1.02 },
