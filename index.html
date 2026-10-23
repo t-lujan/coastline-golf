@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#28283F" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Coastline Golf · Morro Rock</title>
+  <meta name="description" content="One signature hole on the San Luis Obispo coast, played under live Morro Bay weather and the real California sun. Built with three.js by Tyler Lujan." />
+  <meta property="og:title" content="Coastline Golf · Morro Rock" />
+  <meta property="og:description" content="A par 4 to Morro Rock under live Morro Bay weather. Pull back, release, hole out." />
+  <link rel="stylesheet" href="./src/styles.css" />
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+</head>
+<body>
+  <canvas id="scene" aria-label="3D golf hole beside Morro Rock"></canvas>
+
+  <!-- loading -->
+  <section id="loader" aria-live="polite">
+    <div class="load-card">
+      <svg class="load-art" viewBox="0 0 240 120" aria-hidden="true">
+        <defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#B8E6E6"/><stop offset="1" stop-color="#2C6A8C"/></linearGradient></defs>
+        <circle class="load-sun" cx="176" cy="44" r="13" fill="#E1F5F3" />
+        <path d="M34 92 C 52 88, 58 40, 86 30 C 104 24, 120 34, 128 52 C 136 66, 146 82, 168 92 Z" fill="#E1F5F3" opacity=".95"/>
+        <path d="M150 92 C 170 90, 190 86, 236 88 L236 92 Z" fill="#E1F5F3" opacity=".55"/>
+        <g class="load-waves" stroke="url(#lg)" stroke-width="3" fill="none" stroke-linecap="round">
+          <path d="M4 100 q 10 -6 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0"/>
+          <path d="M4 110 q 10 -6 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0" opacity=".5"/>
+        </g>
+      </svg>
+      <p class="eyebrow">Coastline Golf</p>
+      <h1>Hole 1 · Morro Rock</h1>
+      <p class="sub">Par 4 on the San Luis Obispo coast, played under live Morro Bay weather.</p>
+      <div class="load-track"><div id="load-bar"></div></div>
+      <p id="load-step" class="load-step">Starting up</p>
+      <button id="start" class="btn primary" disabled>Loading…</button>
+      <p class="small">Sound comes on with your first tap. Best with headphones.</p>
+    </div>
+  </section>
+
+  <!-- flyover title -->
+  <div id="flytitle" hidden>
+    <p class="eyebrow">Hole 1</p>
+    <h2>Morro Rock</h2>
+    <p>Par 4 · 380 yd · carry the inlet</p>
+    <span class="skip">Tap to skip</span>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud" hidden>
+    <div class="top">
+      <div class="chips">
+        <div class="chip wx" title="Live conditions from Open-Meteo">
+          <span id="wind-arrow" class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 L18 15 L12 12 L6 15 Z" fill="currentColor"/></svg></span>
+          <span id="wx-text">Morro Bay</span><span id="wx-live" class="live">Live</span>
+        </div>
+        <div class="chip sub-chip"><span id="time-text"></span></div>
+        <div class="chip sub-chip"><span>Hole 1 · Morro Rock · Par 4 · 380 yd</span></div>
+      </div>
+      <div class="buttons">
+        <button id="btn-sound" class="icon" aria-label="Sound on" aria-pressed="true">
+          <svg id="snd-on" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+          <svg id="snd-off" viewBox="0 0 24 24" style="display:none"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16 9l6 6M22 9l-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <button id="btn-quality" class="icon wide" aria-label="Graphics quality"><span id="q-label">Auto</span><span id="q-level"></span></button>
+        <button id="btn-info" class="icon" aria-label="How it's built"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none"/><path d="M12 11v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="7.6" r="1.3" fill="currentColor"/></svg></button>
+      </div>
+    </div>
+
+    <div id="hint" hidden><span class="finger"></span>Pull back and release to swing<small>Drag sideways to aim · longer pull = more power</small></div>
+    <div id="power" hidden><div class="power-track"><div id="power-fill"></div></div><span id="power-label"></span></div>
+
+    <div class="bottom">
+      <div class="stats chip">
+        <div><span class="k">Stroke</span><b id="strokes">0</b></div>
+        <div><span class="k">To pin</span><b id="to-pin">–</b></div>
+        <div><span class="k">Lie</span><b id="lie">Tee box</b></div>
+      </div>
+      <div id="clubs" class="seg chip" role="group" aria-label="Club">
+        <button data-club="driver" aria-pressed="true">Driver</button>
+        <button data-club="iron" aria-pressed="false">Iron</button>
+        <button data-club="putter" aria-pressed="false">Putter</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pin" hidden><span id="pin-yd"></span><i></i></div>
+  <div id="dragdot" hidden></div>
+  <div id="pull" hidden></div>
+  <div id="toast" role="status" hidden></div>
+  <div id="banner" hidden><p id="banner-title">Hole out!</p><p id="banner-sub"></p></div>
+
+  <!-- end card -->
+  <section id="endcard" hidden>
+    <div class="card">
+      <p class="eyebrow">Hole 1 · Morro Rock</p>
+      <div class="score"><span id="end-score">E</span><h2 id="end-name">Par</h2></div>
+      <p id="end-detail" class="detail"></p>
+      <div id="end-stats" class="stats3"></div>
+      <p id="end-cond" class="small"></p>
+      <div class="row">
+        <button id="end-share" class="btn primary">Share score</button>
+        <button id="end-replay" class="btn">Play again</button>
+      </div>
+      <button id="end-info" class="link">How it's built</button>
+    </div>
+  </section>
+
+  <!-- how it's built -->
+  <section id="info" hidden role="dialog" aria-modal="true" aria-labelledby="info-title">
+    <div class="card">
+      <button id="info-close" class="icon close" aria-label="Close">✕</button>
+      <p class="eyebrow">How it's built</p>
+      <h2 id="info-title">Coastline Golf</h2>
+      <ul>
+        <li><b>three.js</b>: custom GLSL water (wave slopes, fresnel, sun glints, shoreline foam), gradient sky with clouds, stars and moon, instanced wind-swayed dune grass and cypress, bloom, ACES tone mapping, SMAA/FXAA and adaptive quality.</li>
+        <li><b>Open-Meteo live weather</b> for Morro Bay: real wind pushes your ball, visibility thickens the marine layer, cloud cover greys the sky.</li>
+        <li><b>The real sun</b>: solar position for Morro Rock at the current California time sets the light, from morning fog to golden hour to moonlight.</li>
+        <li><b>Custom physics</b>: drag, backspin lift, wind drift, bounces, rolling friction per surface, sloped greens, lip-outs, water hazard drops.</li>
+        <li><b>Synthesised audio</b>: surf, gulls, the strike and the cup rattle are all generated with WebAudio. No audio files.</li>
+      </ul>
+      <p class="small">Try <code>?time=sunset</code>, <code>?time=morning&amp;weather=fog</code> or <code>?time=night</code>.</p>
+      <p class="links"><a href="https://t-lujan.github.io" target="_blank" rel="noopener">t-lujan.github.io</a><a href="https://github.com/t-lujan" target="_blank" rel="noopener">github.com/t-lujan</a></p>
+    </div>
+  </section>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
