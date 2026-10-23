@@ -24,7 +24,7 @@ export class Ribbon {
   set(points) { this.pts = points.slice(0, this.max); }
   update(camera, headFade = true) {
     const n = this.pts.length, c = camera.position, P = this.pos, A = this.alpha;
-    const g = this.mesh.geometry; g.setDrawRange(0, Math.max(0, (n - 1) * 6));
+    const g = this.mesh.geometry; g.setDrawRange(0, Math.max(0, (n - 1) * 6)); this.mesh.visible = n > 1;   // no empty draw call
     for (let i = 0; i < n; i++) {
       const p = this.pts[i], q = this.pts[Math.min(n - 1, i + 1)], o = this.pts[Math.max(0, i - 1)];
       let tx = q.x - o.x, ty = q.y - o.y, tz = q.z - o.z; const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
@@ -91,7 +91,7 @@ export class Particles {
       if (p.flutter) { p.vx += Math.sin(p.life * 5 + p.ph) * p.flutter * dt; p.vz += Math.cos(p.life * 4 + p.ph) * p.flutter * dt; }
       n++;
     }
-    const g = this.points.geometry; g.setDrawRange(0, n);
+    const g = this.points.geometry; g.setDrawRange(0, n); this.points.visible = n > 0;   // no empty draw call
     for (const k of ['position', 'color', 'aSize', 'aAlpha', 'aRot']) g.attributes[k].needsUpdate = true;
   }
 }

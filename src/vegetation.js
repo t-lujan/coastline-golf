@@ -270,22 +270,24 @@ const eucBark = (x, y, z) => {
 const oakBark = (x, y, z) => { const n = fbm3(x * 3, y * 3, z * 3, 2); return [0.09 + n * 0.06, 0.08 + n * 0.05, 0.07 + n * 0.04]; };
 const cypBark = [0.11, 0.08, 0.065];
 
-function pineGeometry(seed, { H0 = 15, spread = 1 } = {}) {
+function pineGeometry(seed, { H0 = 15, spread = 1, far = false } = {}) {
   // a mature coastal Monterey pine: tall bare trunk with a few broken lower limbs, one or two heavy limbs reaching
   // sideways below the crown, and an irregular, flat-topped, wind-sheared canopy (pushed downwind, +x) built from
   // overlapping needle-tuft masses on crowded upper limbs. Instances are yawed to the prevailing wind.
   const R = rng(seed), parts = [], H = H0 + R() * 2.5;
   const lx = (0.9 + R() * 0.9) * spread, lz = (R() - 0.5) * 0.7;
   const T = (y) => [Math.sin(y * 0.21 + seed) * 0.28 + lx * (y / H) ** 1.7, y, Math.cos(y * 0.17 + seed) * 0.22 + lz * (y / H) ** 1.7];
-  bough(parts, [0, 0.25, 0.5, 0.75, 0.97].map((t) => { const q = T(t * H); if (t === 0) q[1] = -0.5; return q; }), 0.5 * spread + 0.05, 0.12, pineBark, 7);
+  // far: the same tree (same random sequence) with faceted tufts, fewer trunk sides and no twigs hidden in the crown
+  bough(parts, [0, 0.25, 0.5, 0.75, 0.97].map((t) => { const q = T(t * H); if (t === 0) q[1] = -0.5; return q; }), 0.5 * spread + 0.05, 0.12, pineBark, far ? 5 : 7);
   // bare, broken lower limbs angled down
-  for (let i = 0; i < 5; i++) { const y = H * (0.22 + R() * 0.24), a = R() * 6.28, l = 0.5 + R() * 1.0, s = T(y); parts.push(limb(s, [s[0] + Math.cos(a) * l, y - 0.45 + R() * 0.35, s[2] + Math.sin(a) * l], 0.08, 0.02, [0.2, 0.15, 0.11], 4)); }
+  for (let i = 0; i < 5; i++) { const y = H * (0.22 + R() * 0.24), a = R() * 6.28, l = 0.5 + R() * 1.0, s = T(y); if (!far) parts.push(limb(s, [s[0] + Math.cos(a) * l, y - 0.45 + R() * 0.35, s[2] + Math.sin(a) * l], 0.08, 0.02, [0.2, 0.15, 0.11], 4)); }
   const cc = T(H * 0.82), ao = [cc[0] + 0.8 * spread, cc[1] - 0.8, cc[2], 5.6 * spread];
   const crownN = [cc[0] + 0.8 * spread, cc[1] - 3.0, cc[2], 1.0];      // strong pull: the canopy shades as one mass
   const flatTop = H + 0.5, band = [H * 0.46, flatTop];
   const tuft = (c, rx, ry, rz, k, own) => {
     const top = c[1] + ry * 0.75; if (top > flatTop) { const d = top - flatTop; c[1] -= d * 0.6; ry = Math.max(rx * 0.45, ry - d * 0.5); }
-    parts.push(clump(c, rx, ry, rz, seed + k, PAL.pine, { flat: 0.72, droop: 0.5, ao, nrm: [own, crownN], lift: 0.3, band }));
+    const f = far ? 1.12 : 1;
+    parts.push(clump(c, rx * f, ry * f, rz * f, seed + k, PAL.pine, { detail: far ? 0 : 1, flat: 0.72, droop: 0.5, ao, nrm: [own, crownN], lift: 0.3, band }));
   };
   // limbs: two or three heavy ones low and long (some broken bare), then many short crowded ones in the upper crown
   const low = 2 + (R() < 0.5 ? 1 : 0), nl = low + 8;
@@ -297,7 +299,7 @@ function pineGeometry(seed, { H0 = 15, spread = 1 } = {}) {
     const bare = isLow && R() < 0.6;
     if (bare) len *= 0.5;
     const mid = [s0[0] + ca * len * 0.55, y + len * 0.05, s0[2] + sa * len * 0.55], end = [s0[0] + ca * len, y + len * (0.22 + R() * 0.12), s0[2] + sa * len];
-    bough(parts, [s0, mid, end], isLow ? 0.22 : 0.16, 0.045, pineBark, 5);
+    if (!far || isLow) bough(parts, [s0, mid, end], isLow ? 0.22 : 0.16, 0.045, pineBark, far ? 4 : 5);
     if (bare) continue;
     const sz = (isLow ? 0.95 : 1.05 + R() * 0.2) * spread, own = [end[0], end[1] - 0.9, end[2], 0.35];
     const n = isLow ? 2 : 3;
@@ -324,68 +326,72 @@ function pineGeometry(seed, { H0 = 15, spread = 1 } = {}) {
   return parts;
 }
 
-function eucGeometry(seed) {
+function eucGeometry(seed, { far = false } = {}) {
   // tall, pale and open: a forked trunk, long leaders, sparse blue-grey foliage hanging in drooping curtains
   const R = rng(seed), parts = [], H = 21 + R() * 5, fy = H * (0.36 + R() * 0.1);
   const lean = (R() - 0.5) * 1.4, lz = (R() - 0.5) * 0.6;
-  bough(parts, [[0, -0.5, 0], [lean * 0.25, fy * 0.5, lz * 0.3], [lean, fy, lz]], 0.62, 0.42, eucBark, 9);
+  bough(parts, [[0, -0.5, 0], [lean * 0.25, fy * 0.5, lz * 0.3], [lean, fy, lz]], 0.62, 0.42, eucBark, far ? 6 : 9);
   const cc = [lean, H * 0.72, lz, 0.5], ao = [lean, H * 0.7, lz, 5.5];
   const nl = 2 + (R() < 0.65 ? 1 : 0);
   for (let l = 0; l < nl; l++) {
     const a = l / nl * 6.28 + R() * 0.9, sp = 2.0 + R() * 2.6, top = H * (0.84 + R() * 0.16);
     const m = [lean + Math.cos(a) * sp * 0.4, lerp(fy, top, 0.5), lz + Math.sin(a) * sp * 0.4], e = [lean + Math.cos(a) * sp, top, lz + Math.sin(a) * sp];
-    bough(parts, [[lean, fy, lz], m, e], 0.4, 0.09, eucBark, 7);
+    bough(parts, [[lean, fy, lz], m, e], 0.4, 0.09, eucBark, far ? 4 : 7);
     const nbr = 3 + (R() * 2 | 0);
     for (let b = 0; b < nbr; b++) {
       const u = 0.3 + b / nbr * 0.65, s0 = [lerp(m[0], e[0], u * 0.6), lerp(fy, top, u), lerp(m[2], e[2], u * 0.6)], ba = a + (R() - 0.5) * 2.6, bl = 2.4 + R() * 2.6;
       const bm = [s0[0] + Math.cos(ba) * bl * 0.55, s0[1] + bl * 0.3, s0[2] + Math.sin(ba) * bl * 0.55], be = [s0[0] + Math.cos(ba) * bl, s0[1] + bl * 0.05, s0[2] + Math.sin(ba) * bl];
-      bough(parts, [s0, bm, be], 0.13, 0.03, eucBark, 5);
+      bough(parts, [s0, bm, be], 0.13, 0.03, eucBark, far ? 3 : 5);
       // foliage hangs in loose, drooping clouds toward the branch tips
       const tip = [lerp(bm[0], be[0], 0.6), lerp(bm[1], be[1], 0.6) - 0.5, lerp(bm[2], be[2], 0.6)];
       const nq = 8 + (R() * 3 | 0);
       for (let q = 0; q < nq; q++) {
         // many small, faceted hanging tufts stepping down from the twig: the open eucalyptus "curtain"
-        const qa = q * 2.3 + R(), qd = q ? 0.4 + R() * 1.1 : 0, r = 0.36 + R() * 0.26;
+        // (far: every third one, larger, so the curtain keeps its outline at a fraction of the triangles)
+        if (far && q % 3) { R(); R(); R(); R(); continue; }
+        const qa = q * 2.3 + R(), qd = q ? 0.4 + R() * 1.1 : 0, r = (0.36 + R() * 0.26) * (far ? 1.55 : 1);
         const c = [tip[0] + Math.cos(qa) * qd, tip[1] + 0.3 - q * 0.22 - R() * 0.5, tip[2] + Math.sin(qa) * qd];
         parts.push(clump(c, r * 1.0, r * 1.35, r * 0.95, seed + l * 9 + b * 3 + q, PAL.euc, { detail: 0, flat: 0.75, droop: 1.5, ao, lift: 0.45, nrm: [[tip[0], tip[1] + 0.3, tip[2], 0.6], cc] }));
       }
-      if (R() < 0.6) for (let q = 0; q < 3; q++) { const c = [lerp(s0[0], bm[0], 0.7) + (R() - 0.5) * 0.9, lerp(s0[1], bm[1], 0.7) - 0.4 - q * 0.3, lerp(s0[2], bm[2], 0.7) + (R() - 0.5) * 0.9]; parts.push(clump(c, 0.4, 0.5, 0.4, seed + l * 5 + b * 7 + q, PAL.euc, { detail: 0, flat: 0.75, droop: 1.4, ao, lift: 0.45, nrm: [cc] })); }
+      if (R() < 0.6 && !far) for (let q = 0; q < 3; q++) { const c = [lerp(s0[0], bm[0], 0.7) + (R() - 0.5) * 0.9, lerp(s0[1], bm[1], 0.7) - 0.4 - q * 0.3, lerp(s0[2], bm[2], 0.7) + (R() - 0.5) * 0.9]; parts.push(clump(c, 0.4, 0.5, 0.4, seed + l * 5 + b * 7 + q, PAL.euc, { detail: 0, flat: 0.75, droop: 1.4, ao, lift: 0.45, nrm: [cc] })); }
     }
-    for (let q = 0; q < 10; q++) { const qa = q * 2.1 + R(), qd = q ? 0.5 + R() * 1.1 : 0; parts.push(clump([e[0] + Math.cos(qa) * qd, e[1] + 0.2 - q * 0.22 - R() * 0.3, e[2] + Math.sin(qa) * qd], 0.48, 0.6, 0.46, seed + l * 13 + 70 + q, PAL.euc, { detail: 0, flat: 0.75, droop: 1.4, ao, lift: 0.45, nrm: [[e[0], e[1] + 0.2, e[2], 0.6], cc] })); }
+    for (let q = 0; q < 10; q++) { if (far && q >= 4) { R(); R(); R(); continue; } const qa = q * 2.1 + R(), qd = q ? (0.5 + R() * 1.1) * (far ? 1.4 : 1) : 0, f = far ? 1.6 : 1; parts.push(clump([e[0] + Math.cos(qa) * qd, e[1] + 0.2 - q * 0.22 - R() * 0.3, e[2] + Math.sin(qa) * qd], 0.48 * f, 0.6 * f, 0.46 * f, seed + l * 13 + 70 + q, PAL.euc, { detail: 0, flat: 0.75, droop: 1.4, ao, lift: 0.45, nrm: [[e[0], e[1] + 0.2, e[2], 0.6], cc] })); }
   }
   return parts;
 }
 
-function oakGeometry(seed) {
+function oakGeometry(seed, { far = false } = {}) {
   // low and wide: a short trunk, gnarled limbs that spread and dip, and a dense rounded canopy that skirts down at the edges
   const R = rng(seed), parts = [], top = [0.45, 2.0, 0];
-  bough(parts, [[0, -0.4, 0], [0.3, 1.1, 0.1], top], 0.85, 0.6, oakBark, 9);
+  bough(parts, [[0, -0.4, 0], [0.3, 1.1, 0.1], top], 0.85, 0.6, oakBark, far ? 6 : 9);
   const cc = [top[0], 3.6, 0, 1.1], ao = [top[0], 4.4, 0, 5.8];
   for (let i = 0; i < 6; i++) {
     const a = i / 6 * 6.28 + R() * 0.5, tw = (R() - 0.5) * 0.9, r = 4.6 + R() * 1.8, rise = 2.2 + R() * 1.2;
     const pts = [top];
     for (let k = 1; k <= 4; k++) { const f = k / 4, aa = a + tw * Math.sin(f * 3); pts.push([top[0] + Math.cos(aa) * r * f, top[1] + Math.sin(f * 2.4) * rise - f * f * 0.5 + (R() - 0.5) * 0.3, top[2] + Math.sin(aa) * r * f]); }
-    bough(parts, pts, 0.42, 0.08, oakBark, 7);
+    bough(parts, pts, 0.42, 0.08, oakBark, far ? 4 : 7);
   }
-  for (let i = 0; i < 38; i++) {
-    const rr = Math.sqrt((i + 0.5) / 38), a = i * 2.39996 + R() * 0.4, r = rr * 6.4;
-    const y = 6.9 - rr * rr * 3.6 + (R() - 0.5) * 0.7, s = 1.45 + (1 - rr) * 0.6 + R() * 0.55;
-    parts.push(clump([top[0] + Math.cos(a) * r, y, Math.sin(a) * r * 0.92], s * 1.15, s * 0.8, s * 1.1, seed + i * 2.9, PAL.oak, { flat: 0.8, droop: 0.65, ao, nrm: [cc] }));
+  const nt = far ? 16 : 38, f = far ? 1.45 : 1;
+  for (let i = 0; i < nt; i++) {
+    const rr = Math.sqrt((i + 0.5) / nt), a = i * 2.39996 + R() * 0.4, r = rr * 6.4;
+    const y = 6.9 - rr * rr * 3.6 + (R() - 0.5) * 0.7, s = (1.45 + (1 - rr) * 0.6 + R() * 0.55) * f;
+    parts.push(clump([top[0] + Math.cos(a) * r, y, Math.sin(a) * r * 0.92], s * 1.15, s * 0.8, s * 1.1, seed + i * 2.9, PAL.oak, { detail: far ? 0 : 1, flat: 0.8, droop: 0.65, ao, nrm: [cc] }));
   }
   return parts;
 }
 
-function cypressGeometry(seed) {
+function cypressGeometry(seed, { far = false } = {}) {
   // windswept: the trunk bows downwind (+x) and the canopy streams out flat and dense
   const R = rng(seed), parts = [];
-  bough(parts, [[0, -0.4, 0], [0.4, 2.4, 0], [1.6, 4.6, 0.2], [3.4, 6.0, 0]], 0.62, 0.2, cypBark, 8);
-  bough(parts, [[1.0, 3.6, 0], [-0.6, 4.8, 0.5], [-2.2, 5.6, 0.9]], 0.24, 0.08, cypBark, 6);
-  bough(parts, [[1.8, 4.8, 0.1], [4.2, 5.8, -0.5], [6.4, 6.3, -0.8]], 0.24, 0.08, cypBark, 6);
+  bough(parts, [[0, -0.4, 0], [0.4, 2.4, 0], [1.6, 4.6, 0.2], [3.4, 6.0, 0]], 0.62, 0.2, cypBark, far ? 5 : 8);
+  bough(parts, [[1.0, 3.6, 0], [-0.6, 4.8, 0.5], [-2.2, 5.6, 0.9]], 0.24, 0.08, cypBark, far ? 3 : 6);
+  bough(parts, [[1.8, 4.8, 0.1], [4.2, 5.8, -0.5], [6.4, 6.3, -0.8]], 0.24, 0.08, cypBark, far ? 3 : 6);
   const ao = [3, 6.3, 0, 5], cc = [2.5, 4.6, 0, 0.8];
   for (let i = 0; i < 15; i++) {
     const t = i / 14, x = -2.2 + t * 10.5 + (R() - 0.5) * 1.2, z = (R() - 0.5) * (4.2 - t * 1.6);
     const y = 6.3 + Math.sin(t * 3.0) * 0.8 + (R() - 0.5) * 0.6 - t * t * 0.9;
-    parts.push(clump([x, y, z], 2.1 - t * 0.7 + R() * 0.5, 1.05 + R() * 0.3, 1.8 - t * 0.5 + R() * 0.4, i * 3.1 + seed, PAL.cyp, { flat: 0.62, droop: 0.85, ao, nrm: [cc] }));
+    const f = far ? 1.12 : 1;
+    parts.push(clump([x, y, z], (2.1 - t * 0.7 + R() * 0.5) * f, (1.05 + R() * 0.3) * f, (1.8 - t * 0.5 + R() * 0.4) * f, i * 3.1 + seed, PAL.cyp, { detail: far ? 0 : 1, flat: 0.62, droop: 0.85, ao, nrm: [cc] }));
   }
   return parts;
 }
@@ -472,50 +478,94 @@ export function createTrees() {
   const R = rng(5), spots = treeSpots().sort((a, b) => a.pri - b.pri);
   // prevailing NW wind: crowns sheared toward the south-east
   const lean = (135 - HEADING) * Math.PI / 180, dx = Math.sin(lean), dz = -Math.cos(lean), down = Math.atan2(-dz, dx);
+  // each species has full-detail variants for trees near the camera and one cheap far version (same silhouette,
+  // faceted tufts, no hidden twigs) that never casts shadows; trees swap between them by distance
   const kinds = [
-    { kind: 'pine', geos: [pineGeometry(3), pineGeometry(17), pineGeometry(41, { H0: 12.5, spread: 0.85 })], h: 17, sway: 0.25, shadow: 5.5, holes: 0.5 },
-    { kind: 'euc', geos: [eucGeometry(7), eucGeometry(29)], h: 24, sway: 0.35, shadow: 4.8, holes: 1 },
-    { kind: 'oak', geos: [oakGeometry(11)], h: 8, sway: 0.15, shadow: 7.5, holes: 0.2 },
-    { kind: 'cyp', geos: [cypressGeometry(13)], h: 8, sway: 0.2, shadow: 5.5, holes: 0.3 },
+    { kind: 'pine', geos: [pineGeometry(3), pineGeometry(17), pineGeometry(41, { H0: 12.5, spread: 0.85 })], far: pineGeometry(17, { far: true }), h: 17, sway: 0.25, shadow: 5.5, holes: 0.5 },
+    { kind: 'euc', geos: [eucGeometry(7), eucGeometry(29)], far: eucGeometry(7, { far: true }), h: 24, sway: 0.35, shadow: 4.8, holes: 1 },
+    { kind: 'oak', geos: [oakGeometry(11)], far: oakGeometry(11, { far: true }), h: 8, sway: 0.15, shadow: 7.5, holes: 0.2 },
+    { kind: 'cyp', geos: [cypressGeometry(13)], far: cypressGeometry(13, { far: true }), h: 8, sway: 0.2, shadow: 5.5, holes: 0.3 },
   ];
   const g = new THREE.Group(), meshes = [], m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
   const blobs = contactShadows(spots.length), up = new THREE.Vector3(0, 1, 0), nv = new THREE.Vector3(), qy = new THREE.Quaternion();
   const place = (t) => {
-    p.set(t.x, heightAt(t.x, t.z) - 0.25, t.z); q.setFromAxisAngle(up, t.yaw); m.compose(p, q, t.scale); t.mesh.setMatrixAt(t.index, m); t.mesh.instanceMatrix.needsUpdate = true;
+    p.set(t.x, heightAt(t.x, t.z) - 0.25, t.z); q.setFromAxisAngle(up, t.yaw); t.matrix.compose(p, q, t.scale);
     const e = 0.6, n = nv.set(heightAt(t.x - e, t.z) - heightAt(t.x + e, t.z), 2 * e, heightAt(t.x, t.z - e) - heightAt(t.x, t.z + e)).normalize();
     q.setFromUnitVectors(up, n).multiply(qy.setFromAxisAngle(up, t.yaw));
-    const r = t.sc * t.shadow; p.set(t.x, heightAt(t.x, t.z) + 0.12, t.z); s.set(r, 1, r); m.compose(p, q, s); blobs.setMatrixAt(t.blob, m); blobs.instanceMatrix.needsUpdate = true;
+    const r = t.sc * t.shadow; p.set(t.x, heightAt(t.x, t.z) + 0.12, t.z); s.set(r, 1, r); t.blobMatrix.compose(p, q, s);
   };
-  spots.forEach((t, i) => { t.blob = i; });
+  const add = (mesh, shadow) => { mesh.castShadow = shadow; mesh.receiveShadow = true; mesh.frustumCulled = false; mesh.count = 0; g.add(mesh); meshes.push(mesh); return mesh; };
   for (const k of kinds) {
-    const list = spots.filter((t) => t.kind === k.kind);
+    const list = spots.filter((t) => t.kind === k.kind); if (!list.length) continue;
+    const mat = swayMaterial(new THREE.MeshLambertMaterial({ vertexColors: true }), k.sway, k.h, { rim: true, foliage: true, holes: k.holes });
+    const far = add(new THREE.InstancedMesh(mergeTree(k.far), mat, list.length), false);
     k.geos.forEach((parts, vi) => {
       const mine = list.filter((_, i) => i % k.geos.length === vi); if (!mine.length) return;
-      const mat = swayMaterial(new THREE.MeshLambertMaterial({ vertexColors: true }), k.sway, k.h, { rim: true, foliage: true, holes: k.holes });
-      const mesh = new THREE.InstancedMesh(mergeTree(parts), mat, mine.length);
-      mine.forEach((t, i) => {
-        t.mesh = mesh; t.index = i; t.shadow = k.shadow;
+      const near = add(new THREE.InstancedMesh(mergeTree(parts), mat, mine.length), true);
+      for (const t of mine) {
+        t.near = near; t.far = far; t.shadow = k.shadow; t.matrix = new THREE.Matrix4(); t.blobMatrix = new THREE.Matrix4(); t.isNear = true;
         t.yaw = k.kind === 'cyp' ? down + (R() - 0.5) * 0.5 : k.kind === 'pine' ? down + (R() - 0.5) * 1.1 : R() * 6.28;
         t.scale = new THREE.Vector3(t.sc * (0.9 + R() * 0.2), t.sc * (0.85 + R() * 0.3), t.sc * (0.9 + R() * 0.2));
         place(t);
-      });
-      // instances are sorted by priority, so a quality level is just an instance count
-      mesh.userData.lv = Object.fromEntries(Object.entries(QUALITY_PRI).map(([lv, pri]) => [lv, mine.filter((t) => t.pri <= pri).length]));
-      mesh.castShadow = true; mesh.receiveShadow = true;
-      g.add(mesh); meshes.push(mesh);
+      }
     });
   }
-  blobs.userData.lv = Object.fromEntries(Object.entries(QUALITY_PRI).map(([lv, pri]) => [lv, spots.filter((t) => t.pri <= pri).length]));
-  g.add(blobs); meshes.push(blobs);
+  add(blobs, false);
   g.userData.spots = spots;
-  g.userData.setQuality = (lv) => { for (const mesh of meshes) mesh.count = mesh.userData.lv[lv]; };
+  // which trees are drawn, and how: the quality level drops low-priority trees, distance picks near or far meshes,
+  // and trees well behind the camera are skipped (their shadows would fall out of view anyway)
+  let lv = 'high', treeNear = 1e4;
+  const refresh = (cx, cz, fx, fz) => {
+    for (const mesh of meshes) mesh.count = 0;
+    for (const t of spots) {
+      if (t.pri > QUALITY_PRI[lv]) continue;
+      const ddx = t.x - cx, ddz = t.z - cz, d = Math.hypot(ddx, ddz);
+      if (d > 45 && (ddx * fx + ddz * fz) < -0.3 * d) continue;
+      t.isNear = !!t.hero || d < treeNear + (t.isNear ? 6 : 0);   // the tee-shot hero trees are always full detail
+      const mesh = t.isNear ? t.near : t.far;
+      mesh.setMatrixAt(mesh.count++, t.matrix); blobs.setMatrixAt(blobs.count++, t.blobMatrix);
+    }
+    for (const mesh of meshes) { mesh.visible = mesh.count > 0; if (!mesh.visible) continue; mesh.instanceMatrix.clearUpdateRanges(); mesh.instanceMatrix.addUpdateRange(0, mesh.count * 16); mesh.instanceMatrix.needsUpdate = true; }
+  };
+  const view = { x: 1e9, z: 1e9, fx: 0, fz: -1 };
+  g.userData.setQuality = (level, near) => { lv = level; treeNear = near; refresh(view.x, view.z, view.fx, view.fz); };
+  g.userData.update = (cx, cz, fx, fz) => { view.x = cx; view.z = cz; view.fx = fx; view.fz = fz; refresh(cx, cz, fx, fz); };
   let framing = null;
   g.userData.frame = (portrait) => {
     const f = portrait ? 'port' : 'desk'; if (f === framing) return; framing = f;
     for (const t of spots) if (t.hero) { t.x = t.hero[f].x; t.z = t.hero[f].z; place(t); }
+    refresh(view.x, view.z, view.fx, view.fz);
   };
   g.userData.frame(false);
   return g;
+}
+
+// ---------- distance LOD for instanced scatter ----------
+// The full set of instances is kept on the CPU; update() packs the ones worth drawing (near the camera at full density,
+// thinning out between `near` and `far`, nothing well behind the camera) into the front of the GPU buffers.
+export function lodScatter(mesh) {
+  const n = mesh.userData.max, src = mesh.instanceMatrix.array.slice(0, n * 16), col = mesh.instanceColor ? mesh.instanceColor.array.slice(0, n * 3) : null;
+  const R = rng(n * 7 + 3), keep = new Float32Array(n);
+  for (let i = 0; i < n; i++) keep[i] = R();   // a stable per-instance threshold: the same tufts stay as density drops
+  const dst = mesh.instanceMatrix.array, dcol = col && mesh.instanceColor.array;
+  mesh.userData.lod = (cx, cz, fx, fz, frac, near, far) => {
+    let c = 0;
+    const span = Math.max(1, far - near);
+    for (let i = 0; i < n; i++) {
+      const k = keep[i]; if (k >= frac) continue;
+      const o = i * 16, dx = src[o + 12] - cx, dz = src[o + 14] - cz, d2 = dx * dx + dz * dz;
+      if (d2 > far * far) continue;
+      const d = Math.sqrt(d2);
+      if (d > near && k >= frac * (1 - (d - near) / span)) continue;
+      if (d > 14 && dx * fx + dz * fz < -0.35 * d) continue;
+      dst.set(src.subarray(o, o + 16), c * 16); if (col) dcol.set(col.subarray(i * 3, i * 3 + 3), c * 3);
+      c++;
+    }
+    mesh.count = c; mesh.visible = c > 0; if (!c) return;
+    mesh.instanceMatrix.clearUpdateRanges(); mesh.instanceMatrix.addUpdateRange(0, c * 16); mesh.instanceMatrix.needsUpdate = true;
+    if (col) { mesh.instanceColor.clearUpdateRanges(); mesh.instanceColor.addUpdateRange(0, c * 3); mesh.instanceColor.needsUpdate = true; }
+  };
+  return mesh;
 }
 
 // ---------- coyote brush and coastal sage scrub ----------

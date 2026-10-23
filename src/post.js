@@ -3,25 +3,31 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 
 const touch = typeof matchMedia !== 'undefined' && (matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 1);
+// scatter keys (grass, flowers, ice, rocks, drift, shrubs) are density fractions; near/far are the distances (m) where
+// scatter starts thinning and is gone; treeNear is how close a tree must be to use its full mesh (beyond: a cheap far version)
 export const QUALITY = {
-  high: { dpr: 2, bloom: true, bloomScale: touch ? 0.5 : 1, aa: touch ? 'fxaa' : 'smaa', shadow: 2048, grass: 1, post: true, flowers: 1, ice: 1, rocks: 1, drift: 1, shrubs: 1 },
-  med:  { dpr: 1.5, bloom: true, bloomScale: 0.5, aa: 'fxaa', shadow: 1024, grass: 0.6, post: true, flowers: 0.45, ice: 0.6, rocks: 0.6, drift: 1, shrubs: 0.7 },
+  high: { dpr: 2, bloom: true, bloomScale: touch ? 0.5 : 1, mips: 5, aa: touch ? 'fxaa' : 'smaa', shadow: 2048, grass: 1, post: true, flowers: 1, ice: 1, rocks: 1, drift: 1, shrubs: 1,
+    near: 1e4, far: 1e4, treeNear: 1e4, terrain: [300, 310, 100, 290, 120, 100], water: 160, rock: 'high', rockShadow: true },
+  med:  { dpr: touch ? 2 : 1.5, bloom: true, bloomScale: 0.5, mips: 3, aa: 'fxaa', shadow: 1024, grass: 0.55, post: true, flowers: 0.4, ice: 0.5, rocks: 0.6, drift: 1, shrubs: 0.6,
+    near: 55, far: 120, treeNear: 70, terrain: [170, 176, 56, 164, 80, 66], water: 64, rock: 'med', rockShadow: false },
   // low keeps the cheap grade pass (no bloom, no AA) so it still matches the look of the other tiers
-  low:  { dpr: 1, bloom: false, aa: 'none', shadow: 512, grass: 0.35, post: true, flowers: 0, ice: 0.3, rocks: 0.35, drift: 0.5, shrubs: 0.4 },
+  low:  { dpr: touch ? 1.5 : 1, bloom: false, aa: 'none', shadow: 512, grass: 0.35, post: true, flowers: 0, ice: 0.35, rocks: 0.4, drift: 0.5, shrubs: 0.4,
+    near: 38, far: 80, treeNear: 50, terrain: [120, 124, 44, 128, 64, 54], water: 48, rock: 'low', rockShadow: false },
 };
 
 const GradeShader = {
-  uniforms: { tDiffuse: { value: null }, uVig: { value: 0.28 }, uSat: { value: 1.12 }, uContrast: { value: 0.16 }, uLift: { value: new THREE.Vector3() },
+  uniforms: { tDiffuse: { value: null }, toneMappingExposure: { value: 1 }, uVig: { value: 0.28 }, uSat: { value: 1.12 }, uContrast: { value: 0.16 }, uLift: { value: new THREE.Vector3() },
     uShadowTint: { value: new THREE.Vector3(-0.012, 0.004, 0.02) }, uHighTint: { value: new THREE.Vector3(0.018, 0.008, -0.012) } },
   vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  // tone mapping and the sRGB transfer happen here too (no separate OutputPass): one full-screen pass less
   fragmentShader: `uniform sampler2D tDiffuse; uniform float uVig, uSat, uContrast; uniform vec3 uShadowTint, uHighTint, uLift; varying vec2 vUv;
-    void main(){ vec4 c = texture2D(tDiffuse, vUv); vec3 col = c.rgb;
+    #include <tonemapping_pars_fragment>
+    void main(){ vec4 c = texture2D(tDiffuse, vUv); c.rgb = ACESFilmicToneMapping(c.rgb); c = sRGBTransferOETF(c); vec3 col = c.rgb;
       float l = dot(col, vec3(0.299, 0.587, 0.114));
       col = mix(vec3(l), col, uSat);
       col = mix(col, col * col * (3.0 - 2.0 * col), uContrast);                 // gentle S-curve
@@ -39,9 +45,14 @@ export function createPost(renderer, scene, camera, level, w, h, dpr) {
   composer.setPixelRatio(dpr); composer.setSize(w, h);
   composer.addPass(new RenderPass(scene, camera));
   let bloom = null;
-  if (q.bloom) { bloom = new UnrealBloomPass(new THREE.Vector2(w * q.bloomScale, h * q.bloomScale), 0.42, 0.6, 0.9); composer.addPass(bloom); }
-  composer.addPass(new OutputPass());
-  const grade = new ShaderPass(GradeShader); composer.addPass(grade);
+  if (q.bloom) {
+    bloom = new UnrealBloomPass(new THREE.Vector2(w * q.bloomScale, h * q.bloomScale), 0.42, 0.6, 0.9);
+    // fewer blur mips on cheaper tiers: two draw calls per mip saved; the unused mips stay black and are tinted out
+    if (q.mips < bloom.nMips) { for (let i = q.mips; i < bloom.nMips; i++) bloom.bloomTintColors[i].set(0, 0, 0); bloom.nMips = q.mips; }
+    composer.addPass(bloom);
+  }
+  const grade = new ShaderPass(GradeShader); grade.material.toneMapped = false; composer.addPass(grade);   // tone mapping happens in the grade shader, not again in the renderer
+  const exposure = grade.uniforms.toneMappingExposure;
   let fxaa = null;
   if (q.aa === 'smaa') composer.addPass(new SMAAPass(w * dpr, h * dpr));
   else if (q.aa === 'fxaa') { fxaa = new ShaderPass(FXAAShader); composer.addPass(fxaa); }
@@ -49,7 +60,7 @@ export function createPost(renderer, scene, camera, level, w, h, dpr) {
   setRes(w, h);
   return {
     bloom, grade,
-    render: () => composer.render(),
+    render: () => { exposure.value = renderer.toneMappingExposure; composer.render(); },
     setSize: (W, H) => { composer.setSize(W, H); if (bloom) bloom.resolution.set(W * q.bloomScale, H * q.bloomScale); setRes(W, H); },
     dispose: () => { composer.dispose(); rt.dispose(); },
   };

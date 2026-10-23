@@ -8,7 +8,7 @@ import { createWater } from './water.js';
 import { createTerrain, createHills, bakeDepth } from './terrain.js';
 import { createStacks, createFlag, createTeeMarkers, createTeePeg, createBall, createGulls } from './props.js';
 import { createRock } from './rock.js';
-import { windUniforms, leafUniforms, createGrass, createTrees, createShrubs, createFlowers, createIcePlant, createBeachRocks, createDriftwood } from './vegetation.js';
+import { windUniforms, leafUniforms, createGrass, createTrees, createShrubs, createFlowers, createIcePlant, createBeachRocks, createDriftwood, lodScatter } from './vegetation.js';
 import { createBoats, createWisps, createMist } from './atmos.js';
 import { rimUniforms, tameUniforms } from './noise.js';
 import { Ball, BALL_R, CLUBS, SURF, predict } from './physics.js';
@@ -49,11 +49,17 @@ scene.add(hemi, sun, sun.target, fill, fill.target);
 let qMode = params.get('quality') || localStorage.getItem('cg-quality') || 'auto';
 if (!['auto', 'high', 'med', 'low'].includes(qMode)) qMode = 'auto';
 // auto starts from a guess at the device class, then steps down if the frame rate drops below 48
+// iPhone / iPad (iPadOS reports itself as a Mac with touch) / Android phones never start on high: mobile GPUs are
+// fill-rate bound at their 2-3x pixel ratios. iOS hides the real core count and memory, so it is not used there.
+const UA = navigator.userAgent || '';
+const IOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1);
+const MOBILE = IOS || /Android|Mobile/.test(UA);
 function autoTier() {
   const cores = navigator.hardwareConcurrency || 8, mem = navigator.deviceMemory || 8;
   const small = Math.min(screen.width || innerWidth, screen.height || innerHeight) < 600;
-  if (cores <= 2 || mem <= 2 || (touch && (mem <= 3 || cores <= 3))) return 'low';   // very weak
-  if (touch || small || cores <= 4 || mem <= 4) return 'med';                         // phones, tablets, small laptops
+  if (IOS) return small && (window.devicePixelRatio || 1) < 2.5 && Math.max(screen.width, screen.height) < 700 ? 'low' : 'med';   // older 2x small iPhones (SE/8) start low
+  if (cores <= 2 || mem <= 2 || (touch && (mem <= 3 || cores <= 4))) return 'low';   // very weak
+  if (MOBILE || touch || small || cores <= 4 || mem <= 4) return 'med';              // phones, tablets, small laptops
   return 'high';
 }
 const autoStart = autoTier();
@@ -74,19 +80,21 @@ async function build() {
   const weatherP = getWeather(params);
   await loadStep('Shaping the coastline', 0.1);
   const big = !touch;
+  // mesh detail follows the tier the game starts on (built once; a later tier change keeps these meshes)
+  const L = QUALITY[qLevel], ts = qLevel === 'high' && touch ? [230, 238, 70, 205, 90, 75] : L.terrain;
   const depthTex = bakeDepth(512);
-  const terrain = createTerrain({ segX: big ? 300 : 230, segZ: big ? 310 : 238, paintRes: big ? 1024 : 768 });
+  const terrain = createTerrain({ segX: ts[0], segZ: ts[1], paintRes: big ? 1024 : 768, warp: true });
   scene.add(terrain.mesh);
-  const corridor = createTerrain({ segX: big ? 100 : 70, segZ: big ? 290 : 205, paint: terrain.paint, offset: 1, bounds: { minX: -60, maxX: 80, minZ: -178, maxZ: 232 } });
-  const greenPatch = createTerrain({ segX: big ? 120 : 90, segZ: big ? 100 : 75, paint: terrain.paint, offset: 2, bounds: { minX: -28, maxX: 32, minZ: -165, maxZ: -115 } });
+  const corridor = createTerrain({ segX: ts[2], segZ: ts[3], paint: terrain.paint, offset: 1, bounds: { minX: -60, maxX: 80, minZ: -178, maxZ: 232 } });
+  const greenPatch = createTerrain({ segX: ts[4], segZ: ts[5], paint: terrain.paint, offset: 2, bounds: { minX: -28, maxX: 32, minZ: -165, maxZ: -115 } });
   corridor.mesh.receiveShadow = greenPatch.mesh.receiveShadow = true;
   scene.add(corridor.mesh, greenPatch.mesh);
   W0.ground = [greenPatch.mesh, corridor.mesh, terrain.mesh];
-  W0.water = createWater({ depthTex, bounds: BOUNDS, segments: big ? 160 : 110 }); scene.add(W0.water.mesh);
+  W0.water = createWater({ depthTex, bounds: BOUNDS, segments: qLevel === 'high' && touch ? 110 : L.water }); scene.add(W0.water.mesh);
   W0.sky = createSky(); scene.add(W0.sky.mesh);
   scene.add(createHills());
   await loadStep('Raising Morro Rock', 0.35);
-  const rock = createRock(touch ? 'med' : 'high'); W0.crest = rock.userData.crest; scene.add(rock); scene.add(createStacks());
+  const rock = createRock(qLevel === 'high' && touch ? 'med' : L.rock); W0.crest = rock.userData.crest; W0.rock = rock.children[0]; scene.add(rock); scene.add(createStacks());
   W0.boats = createBoats(); scene.add(W0.boats);
   W0.wisps = createWisps(touch ? 45 : 70); scene.add(W0.wisps.points);
   W0.mist = createMist(depthTex, BOUNDS); scene.add(W0.mist.group);
@@ -100,10 +108,11 @@ async function build() {
   W0.peg = createTeePeg(); scene.add(W0.peg);
   W0.gulls = createGulls(touch ? 7 : 11); scene.add(W0.gulls);
   await loadStep('Planting cypress and dune grass', 0.55);
-  W0.grassMax = touch ? 9000 : 20000;
-  W0.grass = createGrass(W0.grassMax); W0.grassMax = W0.grass.count; scene.add(W0.grass);
-  W0.scatter = { flowers: createFlowers(touch ? 2600 : 5000), ice: createIcePlant(touch ? 1400 : 2600), rocks: createBeachRocks(touch ? 260 : 420), drift: createDriftwood(40), shrubs: createShrubs(touch ? 700 : 1100) };
-  for (const m of Object.values(W0.scatter)) scene.add(m);
+  // scatter is thinned by distance from the camera every few metres it moves (see updateLod); reach: how far each kind
+  // carries relative to the tier's near/far distances (bigger plants stay visible further out)
+  W0.scatter = { grass: createGrass(touch ? 9000 : 20000), flowers: createFlowers(touch ? 2600 : 5000), ice: createIcePlant(touch ? 1400 : 2600), rocks: createBeachRocks(touch ? 260 : 420), drift: createDriftwood(40), shrubs: createShrubs(touch ? 700 : 1100) };
+  W0.reach = { grass: 1, flowers: 0.8, ice: 1.4, rocks: 1.6, drift: 1.6, shrubs: 1.7 };
+  for (const m of Object.values(W0.scatter)) { lodScatter(m); scene.add(m); }
   W0.trees = createTrees(); scene.add(W0.trees);
   // ball, effects
   W0.ballMesh = createBall(); scene.add(W0.ballMesh);
@@ -212,9 +221,9 @@ function setQuality(level, persist = true) {
   if (post) post.dispose();
   post = createPost(renderer, scene, camera, level, W, H, dpr); applyGrade();
   sun.shadow.mapSize.set(q.shadow, q.shadow); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
-  if (W0.grass) W0.grass.count = Math.floor(W0.grassMax * q.grass);
-  if (W0.scatter) for (const [k, m] of Object.entries(W0.scatter)) { m.count = Math.floor(m.userData.max * q[k]); m.visible = m.count > 0; }
-  if (W0.trees) W0.trees.userData.setQuality(level);
+  if (W0.trees) W0.trees.userData.setQuality(level, q.treeNear);
+  if (W0.rock) W0.rock.castShadow = q.rockShadow;
+  lodView.force = true;
   leafUniforms.uRagged.value = level === 'low' ? 0 : 1;
   const cap = level[0].toUpperCase() + level.slice(1);
   $('q-label').textContent = qMode === 'auto' ? 'Auto' : cap; $('q-level').textContent = qMode === 'auto' ? ` · ${cap}` : '';
@@ -518,6 +527,18 @@ function meshOffset() {
   restOff = hit ? Math.max(-0.25, Math.min(0.25, hit.point.y - heightAt(ball.p.x, ball.p.z))) : 0;
   return restOff;
 }
+// distance LOD for trees and scatter: repacked when the camera has moved a few metres or turned, at most ~8 times a second
+const lodView = { x: 1e9, z: 1e9, fx: 0, fz: -1, t: 0, force: true };
+function updateLod(rdt) {
+  lodView.t += rdt;
+  const f = camera.getWorldDirection(tmp), fl = Math.hypot(f.x, f.z) || 1, fx = f.x / fl, fz = f.z / fl, p = camera.position;
+  const moved = Math.hypot(p.x - lodView.x, p.z - lodView.z), turned = fx * lodView.fx + fz * lodView.fz;
+  if (!lodView.force && (lodView.t < 0.12 || moved < 3 && turned > 0.97)) return;
+  Object.assign(lodView, { x: p.x, z: p.z, fx, fz, t: 0, force: false });
+  const q = QUALITY[qLevel];
+  for (const [k, m] of Object.entries(W0.scatter)) m.userData.lod(p.x, p.z, fx, fz, q[k], q.near * W0.reach[k], q.far * W0.reach[k]);
+  W0.trees.userData.update(p.x, p.z, fx, fz);
+}
 let last = performance.now(), elapsed = 0, lookTimer = 0;
 function frame(now) {
   const rdt = Math.min(0.05, (now - last) / 1000); last = now;
@@ -613,6 +634,7 @@ function update(rdt) {
 
   updatePin();
   updateWindArrow();
+  updateLod(rdt);
 }
 
 function ordinal(n) { return n + (['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] || ['th', 'st', 'nd', 'rd'][n % 100] || 'th'); }
@@ -733,7 +755,7 @@ if (TEST) {
   window.__golf = {
     get state() { return G.state; }, get strokes() { return G.strokes; }, get ball() { return { ...ball.p, state: ball.state, lie: ball.lie }; },
     get fps() { return perf.fps; }, get fpsHistory() { return perf.history.slice(); }, get frameMs() { return { update: +perf.upd.toFixed(2), render: +perf.ren.toFixed(2) }; }, info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }), get quality() { return qLevel; }, autoStart, get weather() { return weather; }, errors,
-    get yaw() { return G.yaw; }, W0, camera,
+    get yaw() { return G.yaw; }, W0, camera, renderer, scene,
     shoot: (club, power, angleDeg = 0) => { if (club) setClub(club, true); return shoot(G.club, power, G.yaw + angleDeg * Math.PI / 180); },
     freeCam: (...a) => { cam.free = a.length ? a : null; update(1 / 30); post.render(); },
     advance: (sec, step = 1 / 30) => { for (let t = 0; t < sec; t += step) update(step); post.render(); },

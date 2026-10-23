@@ -59,12 +59,15 @@ function bakeAO(x, z, h) {
   return Math.max(0.45, 1 - occ * 2.6);
 }
 
-export function createTerrain({ segX, segZ, paintRes, bounds = BOUNDS, paint: paintIn, offset = 0, ao = true }) {
-  const B = bounds, W = B.maxX - B.minX, D = B.maxZ - B.minZ;
+export function createTerrain({ segX, segZ, paintRes, bounds = BOUNDS, paint: paintIn, offset = 0, ao = true, warp = false }) {
+  const B = bounds, W = B.maxX - B.minX, D = B.maxZ - B.minZ, cx = (B.minX + B.maxX) / 2, cz = (B.minZ + B.maxZ) / 2;
   const geo = new THREE.PlaneGeometry(W, D, segX, segZ); geo.rotateX(-Math.PI / 2);
-  geo.translate((B.minX + B.maxX) / 2, 0, (B.minZ + B.maxZ) / 2);
+  geo.translate(cx, 0, cz);
   const pos = geo.attributes.position, sand = new Float32Array(pos.count), aoA = new Float32Array(pos.count);
+  // warp: pull the grid toward the middle (about twice as dense around the course and shore, sparser at the hazy edges)
+  const wp = (v, c, half) => { const u = (v - c) / half; return c + half * (0.45 * u + 0.55 * u * u * u); };
   for (let i = 0; i < pos.count; i++) {
+    if (warp) { pos.setX(i, wp(pos.getX(i), cx, W / 2)); pos.setZ(i, wp(pos.getZ(i), cz, D / 2)); }
     const x = pos.getX(i), z = pos.getZ(i), h = heightAt(x, z);
     pos.setY(i, h); sand[i] = sandiness(x, z); aoA[i] = ao ? bakeAO(x, z, h) : 1;
   }

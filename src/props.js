@@ -1,20 +1,19 @@
 // Landmarks and course furniture: Morro Rock, the three stacks, flag + cup, tee markers, ball, gulls.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ROCK, STACKS, CUP, TEE, heightAt, fbm } from './course.js';
 
 export function createStacks() {
-  const g = new THREE.Group();
-  const white = new THREE.MeshLambertMaterial({ color: 0xd9dcd8, flatShading: true });
-  const band = new THREE.MeshLambertMaterial({ color: 0x7c8a8e });
+  // the three power-plant stacks and the turbine hall, merged into one vertex-coloured, flat-shaded mesh (one draw call)
+  const parts = [];
+  const tint = (geo, hex) => { geo = geo.toNonIndexed(); const c = new THREE.Color(hex), n = geo.attributes.position.count; geo.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(n * 3).map((_, i) => [c.r, c.g, c.b][i % 3]), 3)); geo.deleteAttribute('uv'); return geo; };
   for (const [x, z] of STACKS) {
     const h = 137, y0 = heightAt(x, z) - 1;
-    const s = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 5.2, h, 10), white); s.position.set(x, y0 + h / 2, z);
-    const b = new THREE.Mesh(new THREE.CylinderGeometry(3.5, 3.5, 6, 10), band); b.position.set(x, y0 + h - 3, z);
-    g.add(s, b);
+    parts.push(tint(new THREE.CylinderGeometry(3.4, 5.2, h, 10).translate(x, y0 + h / 2, z), 0xd9dcd8));
+    parts.push(tint(new THREE.CylinderGeometry(3.5, 3.5, 6, 10).translate(x, y0 + h - 3, z), 0x7c8a8e));
   }
-  const hall = new THREE.Mesh(new THREE.BoxGeometry(90, 26, 40), new THREE.MeshLambertMaterial({ color: 0xbfc3bd, flatShading: true }));
-  hall.position.set(352, heightAt(352, -400) + 12, -400); g.add(hall);
-  return g;
+  parts.push(tint(new THREE.BoxGeometry(90, 26, 40).translate(352, heightAt(352, -400) + 12, -400), 0xbfc3bd));
+  return new THREE.Mesh(mergeGeometries(parts), new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
 }
 
 function flagTexture() {
@@ -50,13 +49,13 @@ export function createFlag() {
 export function createTeeMarkers() {
   // classic mushroom tee markers in the palette, a tee sign, and a ball washer post
   const g = new THREE.Group();
-  const mats = [new THREE.MeshLambertMaterial({ color: 0x4f9fc4 }), new THREE.MeshLambertMaterial({ color: 0x4f9fc4 })];
-  const stem = new THREE.CylinderGeometry(0.02, 0.02, 0.04, 6), cap = new THREE.SphereGeometry(0.1, 18, 12);
-  [[-4.2, 0], [4.2, 1]].forEach(([dx, mi]) => {
-    const y = TEE.h; const s = new THREE.Mesh(stem, mats[mi]); s.position.set(TEE.x + dx, y + 0.06, TEE.z - 1.5);
-    const c = new THREE.Mesh(cap, mats[mi]); c.position.set(TEE.x + dx, y + 0.1, TEE.z - 1.5);
-    s.castShadow = c.castShadow = true; g.add(s, c);
-  });
+  // both markers (stem + cap) merged into one mesh: one draw call, one shadow call
+  const parts = [];
+  for (const dx of [-4.2, 4.2]) {
+    parts.push(new THREE.CylinderGeometry(0.02, 0.02, 0.04, 6).translate(TEE.x + dx, TEE.h + 0.06, TEE.z - 1.5), new THREE.SphereGeometry(0.1, 18, 12).translate(TEE.x + dx, TEE.h + 0.1, TEE.z - 1.5));
+  }
+  const markers = new THREE.Mesh(mergeGeometries(parts.map((p) => p.toNonIndexed())), new THREE.MeshLambertMaterial({ color: 0x4f9fc4 }));
+  markers.castShadow = true; g.add(markers);
   // tee sign
   const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256; const x = cv.getContext('2d');
   x.fillStyle = '#28283F'; x.fillRect(0, 0, 512, 256); x.strokeStyle = '#B8E6E6'; x.lineWidth = 10; x.strokeRect(14, 14, 484, 228);
