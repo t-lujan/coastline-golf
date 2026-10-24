@@ -298,8 +298,8 @@ export function createMadonnaInn(surfaceY = heightAt) {
   for (let i = 0; i < 6; i++) put(new THREE.IcosahedronGeometry(1.4, 0).scale(1, 0.8, 1).translate(-24 + i * 9.5, 1.6, 20.5), [0.16, 0.24, 0.09], 0.2);
   const geo = mergeGeometries(parts); geo.computeVertexNormals();
   const m = new THREE.Mesh(geo, selfLit(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide }), 0.22));
-  // the true place, the facade turned east-north-east toward US-101 as in life, drawn 1.6x so it still reads from ~2 km
-  const S = 1.6; m.rotation.y = faceBearing(70); m.scale.setScalar(S);
+  // the true place, the facade turned east-north-east toward US-101 as in life, drawn 2.5x so it still reads from the tee ~2.2 km away
+  const S = 2.5; m.rotation.y = faceBearing(70); m.scale.setScalar(S);
   let lo = 1e9; for (const [dx, dz] of [[-40, -10], [40, -10], [-40, 20], [40, 20], [0, 0], [100, -10]]) { const c = Math.cos(m.rotation.y), s = Math.sin(m.rotation.y); lo = Math.min(lo, surfaceY(LM.inn.x + (dx * c + dz * s) * S, LM.inn.z + (-dx * s + dz * c) * S)); }
   m.position.set(LM.inn.x, lo - 0.6, LM.inn.z);
   m.frustumCulled = false; m.name = 'madonna-inn'; m.userData.size = 140 * S;
