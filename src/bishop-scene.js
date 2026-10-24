@@ -39,7 +39,7 @@ const bsearch = (arr, v) => { let lo = 0, hi = arr.length - 2; while (lo < hi) {
 // what a patch of hillside is covered with, from its real elevation, slope, aspect and whether it sits in a draw
 const COL = {
   gold0: [0.48, 0.38, 0.21], gold1: [0.62, 0.51, 0.31], green: [0.3, 0.32, 0.14], oak: [0.1, 0.13, 0.06], chap: [0.22, 0.24, 0.13],
-  rock: [0.36, 0.37, 0.38], town: [0.3, 0.32, 0.22],
+  rock: [0.43, 0.43, 0.42], rock2: [0.56, 0.55, 0.52], town: [0.3, 0.32, 0.22],
 };
 const mix3 = (c, d, t) => { c[0] += (d[0] - c[0]) * t; c[1] += (d[1] - c[1]) * t; c[2] += (d[2] - c[2]) * t; };
 export function landColor(x, z, out) {
@@ -66,9 +66,11 @@ export function landColor(x, z, out) {
   const r = Math.hypot(x, z); mix3(out, COL.town, sstep(1400, 2400, r) * (1 - sstep(70, 95, elev)) * (1 - sstep(0.12, 0.25, slope)) * 0.6 * sstep(0.35, 0.6, n3));
   // grey rock: Bishop Peak's crown and upper south / east faces, a little on Cerro San Luis and Chumash near their tops
   const rb = Math.hypot(x - LM.bishop.x, z - LM.bishop.z), rc = Math.hypot(x - LM.cerro.x, z - LM.cerro.z), rch = Math.hypot(x - LM.chumash.x, z - LM.chumash.z);
-  const rockB = sstep(320, 400, elev + n3 * 40) * (1 - sstep(380, 620, rb)) * sstep(0.2, 0.55, slope + n2 * 0.3);
+  const rockB = Math.min(1, sstep(320, 400, elev + n3 * 40) * sstep(0.2, 0.55, slope + n2 * 0.3) + sstep(250, 330, elev + n3 * 50) * sstep(0.6, 0.9, slope + n2 * 0.3) * 0.8) * (1 - sstep(380, 620, rb));
   const rockO = (sstep(330, 380, elev) * (1 - sstep(150, 300, rc)) + sstep(320, 370, elev) * (1 - sstep(150, 300, rch))) * sstep(0.45, 0.8, slope + n3 * 0.3) * 0.6;
-  mix3(out, COL.rock, Math.min(0.92, rockB + rockO));
+  // weathered granite: pale where the slabs are bare, darker in the joints and lichen, so the crown reads as broken rock
+  const rk = [COL.rock[0], COL.rock[1], COL.rock[2]]; mix3(rk, COL.rock2, sstep(0.35, 0.7, n3 * 0.7 + n2 * 0.5 - 0.1));
+  mix3(out, rk, Math.min(0.95, rockB + rockO));
   return h;
 }
 
@@ -157,7 +159,7 @@ export function createBishopKnobs(detail = 1) {
       p.setXYZ(i, wx, wy, wz);
       if (vy > 0.4) crest.push(new THREE.Vector3(wx, wy, wz));
       const s = fbm3(vx * 3 + si, vy * 3, vz * 3, 2), lichen = sstep(0.55, 0.75, fbm3(vx * 5 + 7, vy * 5, vz * 5 + si, 2)), shade = vy < -0.2 ? 0.75 : 1;
-      const gr = (0.3 + s * 0.16) * shade;
+      const gr = (0.4 + s * 0.2) * shade;
       col.push(lerp(gr * 0.97, 0.52, lichen * 0.35), lerp(gr, 0.5, lichen * 0.35), lerp(gr * 0.96, 0.34, lichen * 0.35));
     }
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); parts.push(toNonIndexed(g));

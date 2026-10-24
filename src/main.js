@@ -1056,6 +1056,18 @@ function updateWindArrow() {
 // ---------- test hooks ----------
 if (TEST) {
   window.__golf = {
+    // Bishop Peak rock-tint check: share of grey-rock land colour in the summit band (top 15% above the valley) vs the lower half
+    rockStats: () => {
+      if (MAP_ID !== 'bishop') return null;
+      const L = bishop.LM.bishop, c = [0, 0, 0], v0 = 60, top = L.elev, st = { sum: [0, 0], low: [0, 0] };
+      for (let i = 0; i < 40000; i++) {
+        const a = Math.random() * 6.28, r = Math.sqrt(Math.random()) * 900, x = L.x + Math.cos(a) * r, z = L.z + Math.sin(a) * r;
+        const e = bishop.elevAt(x, z), f = (e - v0) / (top - v0); landColor(x, z, c);
+        const mx = Math.max(...c), mn = Math.min(...c), lum = (mx + mn) / 2, sat = mx > 0 ? (mx - mn) / mx : 0, grey = sat < 0.12 && lum > 0.25 && lum < 0.6;
+        const b = f >= 0.85 ? st.sum : f < 0.5 ? st.low : null; if (b) { b[0]++; if (grey) b[1]++; }
+      }
+      return { summitGrey: +(st.sum[1] / st.sum[0]).toFixed(3), lowerGrey: +(st.low[1] / st.low[0]).toFixed(3), n: [st.sum[0], st.low[0]] };
+    },
     get state() { return G.state; }, get strokes() { return G.strokes; }, get ball() { return { ...ball.p, state: ball.state, lie: ball.lie }; },
     get fps() { return perf.fps; }, get fpsHistory() { return perf.history.slice(); }, get frameMs() { return { update: +perf.upd.toFixed(2), render: +perf.ren.toFixed(2) }; }, info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }), get quality() { return qLevel; }, get tierChanges() { return tierChanges; }, autoStart, get weather() { return weather; }, errors,
     get yaw() { return G.yaw; }, get preview() { return G.preview; }, get pvZoom() { return G.pvZoom; }, togglePreview, previewLand, tapPreview, get pvSpot() { return G.pvSpot; }, get pvLabel() { return $('pvtap').hidden ? '' : $('pvtap').textContent; }, get grid() { return { visible: W0.grid.mesh.visible, on: W0.grid.on, count: W0.grid.pts.length }; }, get club() { return G.club; }, W0, camera, renderer, scene,
