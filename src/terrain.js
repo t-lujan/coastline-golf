@@ -34,14 +34,16 @@ const PALETTES = {
         vec3 sn = normalize(cross(dFdx(vWP), dFdy(vWP)));
         col = mix(col, vec3(0.21, 0.24, 0.12) * (0.8 + nF * 0.4), smoothstep(0.3, 0.6, 1.0 - abs(sn.y)) * 0.5);`,
     fairway: `float wob = (nF - 0.5) * 0.35 + (nM - 0.5) * 0.7;
-          // semi-rough: a band where the green turf thins out into the straw-coloured rough
-          float semi = 1.0 - smoothstep(0.4, 2.6, P.r - 2.0 + wob * 0.6 + (nG - 0.5) * 0.8);
-          col = mix(col, mix(vec3(0.2, 0.27, 0.09), vec3(0.36, 0.37, 0.18), nF * 0.7 + nG * 0.3), semi * 0.85);
-          float cut = edgeS(P.r - 1.8 + wob * 0.5, 0.35);
-          col = mix(col, vec3(0.12, 0.25, 0.055) * (0.9 + nF * 0.2), cut);
+          // the mowed edge fades through a first cut and a few metres of intermediate rough where the green turf thins
+          // out into the straw grass: wide, overlapping falloffs, no pasted-on line (P.r saturates at 5.3 m)
+          float e = P.r + wob * 0.3;
+          float semi = (1.0 - smoothstep(1.6, 5.0, e)) * 0.9;
+          col = mix(col, mix(vec3(0.24, 0.29, 0.1), vec3(0.38, 0.37, 0.19), nF * 0.7 + nG * 0.3), semi);
+          float cut = 1.0 - smoothstep(0.0, 3.0, e);
+          col = mix(col, vec3(0.14, 0.26, 0.06) * (0.9 + nF * 0.2), cut);
           float stripe = smoothstep(0.3, 0.7, abs(fract((p.x * 0.35 + p.y * 0.94) / 11.0) - 0.5) * 2.0);
           vec3 fw = mix(vec3(0.13, 0.28, 0.055), vec3(0.165, 0.33, 0.07), stripe) * (0.94 + nF * 0.1);
-          float fwk = edgeS(P.r + wob * 0.25, 0.3);
+          float fwk = 1.0 - smoothstep(-0.9, 0.9, e);
           col = mix(col, fw, fwk);` },
 };
 
