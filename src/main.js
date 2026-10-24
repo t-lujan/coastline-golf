@@ -552,8 +552,8 @@ function buildFlyover() {
       f(5.0, 118, 37, 22, G0.x + 30, 23, G0.z - 22),     // settle over the green a little high and aimed a little low,
       f(6.9, 176, 31, 42, c.x + 12, c.y, c.z - 8),       // so the view keeps tipping down onto the flag: one dip, then level out
       f(8.8, 130, 34, 122, 134, heightAt(134, 22) + 1, 22),
-      f(10.4, 70, 30, 212, 70, heightAt(70, 70) + 1, 70),
-      f(12.6, e.x, e.y, e.z, l.x, l.y, l.z),
+      f(10.4, 70, 30, 212, 52, heightAt(52, 70) + 1, 70),   // already leaning left: the heading keeps turning one way onto the Inn
+      f(12.6, ...panPos(0, true).toArray(), ...panLook(0)),   // lands on the tee camera already turned onto the Madonna Inn: the opening pan takes over
     ];
     fly.path = keyPath(keys); fly.dur = keys[keys.length - 1][0];
     return;
@@ -571,6 +571,31 @@ function buildFlyover() {
   ].map(([t, ...r]) => [t * k, ...r]);
   fly.path = keyPath(keys); fly.dur = keys[keys.length - 1][0];
 }
+// the opening pan on Bishop Peak: from the tee camera the view starts on the Madonna Inn, sweeps right to Cerro San Luis
+// and its M, holds a beat and settles back on the tee aim view. Only the heading turns (position and pitch stay those of
+// the tee camera), each leg eased in and out, so there is no pitch wobble and the last frame is exactly aimPose()
+const pan = { t: 0, dur: 4.6, legs: null, pos: null, R: 1, pitch: 0, lift: 16 };
+const hdg = (x, z) => Math.atan2(x, -z), wrapA = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+function buildPan() {
+  const a = aimPose('driver', G.yaw), v = a.look.clone().sub(a.pos), LM = bishop.LM;
+  pan.pos = a.pos; pan.R = v.length(); pan.pitch = Math.asin(v.y / pan.R);
+  const h2 = hdg(v.x, v.z), at = (o) => h2 + wrapA(hdg(o.x - a.pos.x, o.z - a.pos.z) - h2);
+  const h0 = at(LM.inn), h1 = (at(LM.cerro) + at(LM.m)) / 2;
+  pan.legs = [[0, 2.0, h0, h1], [2.0, 2.5, h1, h1], [2.5, pan.dur, h1, h2]];
+}
+function panLook(t, fresh) {
+  if (fresh || !pan.legs) buildPan();
+  const L = pan.legs.find((g) => t <= g[1]) || pan.legs[pan.legs.length - 1], u = Math.max(0, Math.min(1, (t - L[0]) / (L[1] - L[0])));
+  const s = u * u * u * (u * (u * 6 - 15) + 10), h = L[2] + (L[3] - L[2]) * s, c = Math.cos(pan.pitch) * pan.R, p = panPos(t);
+  return [p.x + Math.sin(h) * c, p.y + Math.sin(pan.pitch) * pan.R, p.z - Math.cos(h) * c];
+}
+// the camera starts a few metres up (so the Inn clears the near trees and rises) and eases down to the tee camera
+function panPos(t, fresh) { if (fresh || !pan.legs) buildPan(); const u = Math.max(0, Math.min(1, t / pan.dur)), s = u * u * u * (u * (u * 6 - 15) + 10); return tmpP.copy(pan.pos).setY(pan.pos.y + pan.lift * (1 - s)); }
+const tmpP = new V3();
+function startPan() {
+  buildPan(); pan.t = 0; G.state = 'pan';
+  camera.position.copy(panPos(0)); cam.look.set(...panLook(0)); camera.lookAt(cam.look); cam.to = null;
+}
 function startFlyover() {
   buildFlyover();
   G.state = 'flyover'; fly.t = 0;
@@ -581,7 +606,13 @@ function endFlyover(quick) {
   perf.frames = 0; perf.t0 = fly.endT;   // auto quality starts judging the frame rate only now (see trackPerf)
   $('flytitle').hidden = true;
   G.yaw = aimYaw(); setClub(autoClub());
-  tweenTo(aimPose(), quick ? 0.9 : 1.4);
+  if (BISHOP && !quick) { startPan(); return; }
+  toAim(quick ? 0.9 : 1.4);
+}
+// skipping the pan (tap / click / any key) cuts straight to the tee aim view
+function endPan() { G.yaw = aimYaw(); const a = aimPose(); camera.position.copy(a.pos); cam.look.copy(a.look); camera.lookAt(cam.look); toAim(0); }
+function toAim(dur) {
+  if (dur > 0) tweenTo(aimPose(), dur); else cam.to = null;
   G.state = 'aim'; $('hud').hidden = false;
   if (!G.hinted) $('hint').hidden = false;
   updateHud();
@@ -604,6 +635,7 @@ function dragShot() {
 canvas.addEventListener('pointerdown', (e) => {
   audio.unlock();
   if (G.state === 'flyover') { endFlyover(true); return; }
+  if (G.state === 'pan') { endPan(); return; }
   if (G.state !== 'aim') return;
   if (G.preview) { if (pvPtr.size) pvTap.bad = true; else pvTap.bad = false; pvTap.t = performance.now(); pvPtr.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY }); try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic */ } return; }
   if (!G.hinted) { G.hinted = true; $('hint').hidden = true; }
@@ -679,6 +711,7 @@ for (const b of document.querySelectorAll('#clubs button[data-club]')) b.addEven
 $('btn-preview').addEventListener('click', () => togglePreview());
 $('btn-grid').addEventListener('click', () => { W0.grid.on = !W0.grid.on; });
 window.addEventListener('keydown', (e) => {
+  if (G.state === 'pan') { endPan(); return; }
   if (G.state === 'aim' && !cam.to) {
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { G.yaw += (e.key === 'ArrowLeft' ? -1 : 1) * (G.club === 'putter' ? 0.01 : 0.02); if (!G.preview) tweenTo(aimPose(), 0.12); }
     if ((e.key === ',' || e.key === '.') && G.club !== 'putter') { G.curve = Math.max(-1, Math.min(1, Math.round((G.curve + (e.key === ',' ? -0.5 : 0.5)) * 2) / 2)); G.lastPred = null; updateCurveHud(); if (drag.on) updateAim(); }
@@ -943,6 +976,11 @@ function updateCamera(rdt, dt) {
     if (fly.t > fly.dur) endFlyover(false);
     return;
   }
+  if (G.state === 'pan') {
+    pan.t += rdt; camera.position.copy(panPos(pan.t)); cam.look.set(...panLook(pan.t)); camera.lookAt(cam.look);
+    if (pan.t >= pan.dur) endPan();
+    return;
+  }
   if (cam.to) {
     cam.tt += rdt; const u = ease(Math.min(1, cam.tt / cam.dur));
     camera.position.lerpVectors(cam.from.pos, cam.to.pos, u); cam.look.lerpVectors(cam.from.look, cam.to.look, u);
@@ -1136,7 +1174,11 @@ if (TEST) {
     },
     // what the camera actually did, frame by frame, while the intro played (see frame())
     introLog: [],
-    skip: () => { if (G.state === 'flyover') endFlyover(true); },
+    skip: () => { if (G.state === 'flyover') endFlyover(true); else if (G.state === 'pan') endPan(); },
+    // the opening pan (Bishop only): play it from the tee, hold it at a time, or read it
+    playPan: () => { if (BISHOP) { G.yaw = aimYaw(); setClub(autoClub()); $('hud').hidden = true; startPan(); } return G.state; },
+    panAt: (sec) => { pan.t = sec; }, panLift: (m) => { pan.lift = m; }, heightAt,
+    get panState() { return { t: pan.t, dur: pan.dur, active: G.state === 'pan', legs: pan.legs, pos: pan.pos && pan.pos.toArray() }; },
     finishMove: () => { if (cam.to) { cam.tt = cam.dur; } },
     placeNearCup: (d = 0.9) => {
       const a = Math.atan2(TEE.x - CUP.x, TEE.z - CUP.z);
