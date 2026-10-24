@@ -126,7 +126,8 @@ async function build() {
       const n = normalAt(x, z), sl = Math.hypot(n.x, n.z) / n.y, l = Math.hypot(n.x, n.z) || 1;
       pts.push({ x, z, dx: n.x / l, dz: n.z / l, sl, ph: Math.random() });
     }
-    const geo = new THREE.PlaneGeometry(1, 0.07); geo.rotateX(-Math.PI / 2);
+    // tapered dash: wide uphill end (-x) narrowing to a point downhill (+x) so the direction reads in a still frame
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, 0, -0.055, -0.5, 0, 0.055, 0.5, 0, 0], 3));
     const m = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false, fog: false }), pts.length);
     m.frustumCulled = false; m.visible = false; m.renderOrder = 3; scene.add(m); W0.grid = { mesh: m, pts, on: true };
   }
@@ -766,6 +767,8 @@ function update(rdt) {
   if (W0.marker.visible) W0.marker.scale.setScalar(Math.max(0.5, camera.position.distanceTo(W0.marker.position) * 0.028));
 
   const gShow = G.state === 'aim' && G.club === 'putter' && ball.lie === 'green', gb = $('btn-grid'), gr = W0.grid;
+  const hintHide = G.hinted || G.state !== 'aim' || G.preview || (G.club === 'putter' && ball.lie === 'green'), hn = $('hint');
+  if (hn.hidden !== hintHide) hn.hidden = hintHide;
   if (gb.hidden === gShow) gb.hidden = !gShow;
   if (gb.getAttribute('aria-pressed') !== String(gr.on)) gb.setAttribute('aria-pressed', String(gr.on));
   if (gr.mesh.visible !== (gShow && gr.on)) gr.mesh.visible = gShow && gr.on;
@@ -955,8 +958,8 @@ if (TEST) {
     // put the ball down anywhere and set up the shot (auto club) as if it had come to rest there
     place: (x, z) => { ball.place(x, z); G.manualClub = false; prepareShot(0.2); cam.tt = cam.dur; return { lie: ball.lie, club: G.club }; },
     // a windless shot from (x, z) with a given lie: carry / total / roll in yards
-    sim: (club, power, x, z, lie) => {
-      const b = new Ball(); b.place(x, z); if (lie) b.lie = lie; b.strike(club, power, 0, { x: 0, z: 0 });
+    sim: (club, power, x, z, lie, yaw = 0) => {
+      const b = new Ball(); b.place(x, z); if (lie) b.lie = lie; b.strike(club, power, yaw, { x: 0, z: 0 });
       for (let i = 0; i < 240 * 60 && (b.state === 'flight' || b.state === 'roll'); i++) b.step(1 / 240);
       const tot = Math.hypot(b.p.x - x, b.p.z - z);
       return { carry: b.carry * YD, total: tot * YD, roll: (tot - b.carry) * YD, end: surfaceAt(b.p.x, b.p.z), x: b.p.x, z: b.p.z };
