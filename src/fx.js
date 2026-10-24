@@ -47,10 +47,18 @@ export function groundLine(from, yaw, length, step = 1.5) {
 
 export function createMarker() {
   const g = new THREE.Group();
-  const ring = new THREE.Mesh(new THREE.RingGeometry(0.82, 1, 48), new THREE.MeshBasicMaterial({ color: 0xb8e6e6, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+  // drawn on top (no depth test) so a crest or the terrain mesh never hides it; main.js scales the group with camera distance
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.78, 1, 48), new THREE.MeshBasicMaterial({ color: 0xb8e6e6, transparent: true, opacity: 0.9, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending, fog: false }));
   ring.rotation.x = -Math.PI / 2; g.add(ring);
   const dot = new THREE.Mesh(new THREE.CircleGeometry(0.22, 24), ring.material); dot.rotation.x = -Math.PI / 2; g.add(dot);
-  g.renderOrder = 6; g.visible = false; return g;
+  // short upright beacon that fades out toward the top
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.18, 3.5, 12, 1, true).translate(0, 1.75, 0), new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, depthTest: false, fog: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+    vertexShader: `varying float vY; void main(){ vY = uv.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+    fragmentShader: `varying float vY; void main(){ gl_FragColor = vec4(vec3(0.72, 0.9, 0.9) * 0.9, 0.75 * (1.0 - vY)); }`,
+  }));
+  g.add(beam);
+  g.renderOrder = 6; ring.renderOrder = dot.renderOrder = beam.renderOrder = 6; g.visible = false; return g;
 }
 
 // generic CPU particle system on THREE.Points (soft round sprites)

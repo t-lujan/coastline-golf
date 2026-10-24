@@ -249,7 +249,7 @@ window.addEventListener('resize', resize);
 
 // ---------- game state ----------
 const ball = new Ball();
-const G = { state: 'loading', strokes: 0, club: 'driver', manualClub: false, yaw: 0, putts: 0, longest: 0, penalties: 0, t: 0, timeScale: 1, hinted: false };
+const G = { preview: false, pvZoom: 1, lastPower: 1, state: 'loading', strokes: 0, club: 'driver', manualClub: false, yaw: 0, putts: 0, longest: 0, penalties: 0, t: 0, timeScale: 1, hinted: false };
 const cam = { pos: new V3(), look: new V3(), from: null, to: null, tt: 0, dur: 1, dir: new THREE.Vector2(0, -1) };
 const cupPos = () => new V3(CUP.x, heightAt(CUP.x, CUP.z), CUP.z);
 const distToCup = () => Math.hypot(ball.p.x - CUP.x, ball.p.z - CUP.z);
@@ -264,7 +264,7 @@ function autoClub() {
 }
 function setClub(c, manual = false) {
   G.club = c; G.manualClub = manual;
-  for (const b of document.querySelectorAll('#clubs button')) b.setAttribute('aria-pressed', String(b.dataset.club === c));
+  for (const b of document.querySelectorAll('#clubs button[data-club]')) b.setAttribute('aria-pressed', String(b.dataset.club === c));
 }
 function aimPose(club = G.club, yaw = G.yaw) {
   const putt = club === 'putter', p = ball.p;
@@ -279,9 +279,32 @@ function aimPose(club = G.club, yaw = G.yaw) {
   const lk = new V3(lx, putt ? heightAt(lx, lz) : Math.max(onTee ? 0 : p.y, heightAt(lx, lz)) + 2.2 + ahead * 0.012, lz);
   return { pos, look: lk };
 }
+// landing-zone preview: the camera hangs above and behind the predicted carry spot (default: last full-shot power)
+const pvKey = { k: '', land: { x: 0, z: 0 } };
+function previewLand() {
+  const k = `${G.club},${G.yaw},${G.lastPower},${ball.p.x},${ball.p.z}`;
+  if (k !== pvKey.k) {
+    const pr = predict(ball.p, ball.lie, G.club, G.lastPower, G.yaw, { x: 0, z: 0 }), cp = pr.carryPt || pr.end, len = Math.hypot(cp.x - ball.p.x, cp.z - ball.p.z);
+    pvKey.k = k; pvKey.land = { x: ball.p.x + Math.sin(G.yaw) * len, z: ball.p.z - Math.cos(G.yaw) * len };
+  }
+  return pvKey.land;
+}
+function previewPose() {
+  const l = previewLand(), gy = Math.max(0.05, heightAt(l.x, l.z)), z = G.pvZoom, dx = Math.sin(G.yaw), dz = -Math.cos(G.yaw);
+  const cx = l.x - dx * 42 * z, cz = l.z - dz * 42 * z;
+  return { pos: new V3(cx, Math.max(heightAt(cx, cz) + 2, gy + 24 * z), cz), look: new V3(l.x, gy + 1, l.z) };
+}
+function togglePreview(force) {
+  const on = force ?? !G.preview;
+  if (G.state !== 'aim' || on === G.preview || on && G.club === 'putter') return G.preview;
+  G.preview = on; drag.on = false; $('dragdot').hidden = true; $('pull').hidden = true; $('power').hidden = true;
+  if (on) { W0.aimLine.set([]); tweenTo(previewPose(), 0.9); } else { W0.marker.visible = false; tweenTo(aimPose(), 0.8); }
+  return G.preview;
+}
 function tweenTo(pose, dur) { cam.from = { pos: camera.position.clone(), look: cam.look.clone() }; cam.to = pose; cam.tt = 0; cam.dur = dur; }
 
 function prepareShot(dur = 1.6) {
+  G.preview = false;
   G.yaw = yawTo(CUP.x, CUP.z);
   if (!G.manualClub || ball.lie === 'green') setClub(autoClub());
   G.manualClub = false;
@@ -308,7 +331,8 @@ function toast(msg, ms = 1600) { const t = $('toast'); t.textContent = msg; t.hi
 // ---------- shots ----------
 function shoot(club, power, yaw) {
   if (G.state !== 'aim') return false;
-  G.strokes++; if (club === 'putter') G.putts++;
+  G.strokes++; if (club === 'putter') G.putts++; else G.lastPower = Math.max(0.3, power);
+  G.preview = false;
   G.shotStart = { ...ball.p }; G.shotFromTee = ball.lie === 'tee'; G.cupCheck = false; G.slowmo = false; G.waterHandled = false;
   ball.lipped = false;
   ball.strike(club, power, yaw, weather.wind);
@@ -460,6 +484,8 @@ function endFlyover(quick) {
 
 // ---------- input ----------
 const drag = { on: false, x0: 0, y0: 0, x: 0, y: 0, id: null };
+const pvPtr = new Map();   // preview: a horizontal drag turns the aim, a pinch zooms, and neither can swing
+const pvZoom = (k) => { G.pvZoom = Math.max(0.5, Math.min(1.8, G.pvZoom * k)); };
 function dragShot() {
   const dx = drag.x - drag.x0, dy = drag.y - drag.y0, len = Math.hypot(dx, dy);
   const scale = 0.34 * Math.min(W, H);
@@ -473,12 +499,22 @@ canvas.addEventListener('pointerdown', (e) => {
   audio.unlock();
   if (G.state === 'flyover') { endFlyover(true); return; }
   if (G.state !== 'aim') return;
+  if (G.preview) { pvPtr.set(e.pointerId, { x: e.clientX, y: e.clientY }); try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic */ } return; }
   if (!G.hinted) { G.hinted = true; $('hint').hidden = true; }
   drag.on = true; drag.id = e.pointerId; drag.x0 = drag.x = e.clientX; drag.y0 = drag.y = e.clientY;
   try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic or already released */ }
   $('dragdot').style.transform = `translate(${e.clientX}px, ${e.clientY}px)`; $('dragdot').hidden = false;
 });
 canvas.addEventListener('pointermove', (e) => {
+  const q = pvPtr.get(e.pointerId);
+  if (q) {
+    if (pvPtr.size === 1) G.yaw += (e.clientX - q.x) * 0.0025;
+    else if (pvPtr.size === 2) {
+      const [a, b] = [...pvPtr.entries()].map(([id, v]) => id === e.pointerId ? { x: e.clientX, y: e.clientY } : v), [c, d] = [...pvPtr.values()];
+      pvZoom(Math.hypot(c.x - d.x, c.y - d.y) / (Math.hypot(a.x - b.x, a.y - b.y) || 1));
+    }
+    pvPtr.set(e.pointerId, { x: e.clientX, y: e.clientY }); return;
+  }
   if (!drag.on || e.pointerId !== drag.id) return;
   drag.x = e.clientX; drag.y = e.clientY; updateAim();
 });
@@ -491,6 +527,8 @@ const endDrag = (fire) => (e) => {
 };
 canvas.addEventListener('pointerup', endDrag(true));
 canvas.addEventListener('pointercancel', endDrag(false));
+for (const t of ['pointerup', 'pointercancel']) canvas.addEventListener(t, (e) => { pvPtr.delete(e.pointerId); });
+canvas.addEventListener('wheel', (e) => { if (G.preview) { e.preventDefault(); pvZoom(Math.exp(e.deltaY * 0.001)); } }, { passive: false });
 let aimCache = 0;
 function updateAim() {
   const s = dragShot();
@@ -515,11 +553,16 @@ function updateAim() {
   if (G.club === 'putter') W0.aimLine.set(groundLine(ball.p, s.yaw, len, 0.25)); else W0.aimLine.set([]);
   W0.marker.visible = true; W0.marker.position.set(land.x, Math.max(0.05, heightAt(land.x, land.z)) + 0.08, land.z);
 }
-for (const b of document.querySelectorAll('#clubs button')) b.addEventListener('click', () => { if (G.state !== 'aim') return; setClub(b.dataset.club, true); tweenTo(aimPose(), 0.6); });
+for (const b of document.querySelectorAll('#clubs button[data-club]')) b.addEventListener('click', () => { if (G.state !== 'aim') return; setClub(b.dataset.club, true); if (G.preview && b.dataset.club === 'putter') togglePreview(false); else if (!G.preview) tweenTo(aimPose(), 0.6); });
+$('btn-preview').addEventListener('click', () => togglePreview());
 window.addEventListener('keydown', (e) => {
   if (G.state === 'aim' && !cam.to) {
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { G.yaw += (e.key === 'ArrowLeft' ? -1 : 1) * (G.club === 'putter' ? 0.01 : 0.02); tweenTo(aimPose(), 0.12); }
-    const k = { 1: 'driver', 2: 'iron', 3: 'wedge', 4: 'putter' }[e.key]; if (k) { setClub(k, true); tweenTo(aimPose(), 0.6); }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { G.yaw += (e.key === 'ArrowLeft' ? -1 : 1) * (G.club === 'putter' ? 0.01 : 0.02); if (!G.preview) tweenTo(aimPose(), 0.12); }
+    const k = { 1: 'driver', 2: 'iron', 3: 'wedge', 4: 'putter' }[e.key]; if (k) { setClub(k, true); if (G.preview && k === 'putter') togglePreview(false); else if (!G.preview) tweenTo(aimPose(), 0.6); }
+  }
+  if (G.state === 'aim' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.key === 'z' || e.key === 'Z') togglePreview();
+    else if (e.key === 'Tab' && (document.activeElement === document.body || document.activeElement === canvas) && G.club !== 'putter') { e.preventDefault(); togglePreview(); }
   }
   if (e.key === 'Escape') { $('info').hidden = true; }
 });
@@ -688,6 +731,10 @@ function update(rdt) {
   sun.position.copy(sun.target.position).addScaledVector(ld, 400); sun.target.updateMatrixWorld();
 
   W0.tracer.update(camera); W0.aimLine.update(camera, false);
+  if (G.preview) { const l = previewLand(); W0.marker.visible = true; W0.marker.position.set(l.x, Math.max(0.05, heightAt(l.x, l.z)) + 0.08, l.z); }
+  const pb = $('btn-preview'), pbShow = G.state === 'aim' && G.club !== 'putter';
+  if (pb.hidden === pbShow) pb.hidden = !pbShow;
+  if (pb.getAttribute('aria-pressed') !== String(G.preview)) pb.setAttribute('aria-pressed', String(G.preview));
   if (W0.marker.visible) W0.marker.scale.setScalar(Math.max(0.5, camera.position.distanceTo(W0.marker.position) * 0.028));
 
   updatePin();
@@ -751,6 +798,9 @@ function updateCamera(rdt, dt) {
     camera.lookAt(cam.look);
     if (cam.tt >= cam.dur) cam.to = null;
     return;
+  }
+  if (G.preview && G.state === 'aim') {
+    const pp = previewPose(); camera.position.lerp(pp.pos, damp(5, rdt)); cam.look.lerp(pp.look, damp(5, rdt)); camera.lookAt(cam.look); return;
   }
   const p = ball.p;
   if (G.state === 'flight' || G.state === 'water' || G.state === 'holed') {
@@ -858,7 +908,7 @@ if (TEST) {
   window.__golf = {
     get state() { return G.state; }, get strokes() { return G.strokes; }, get ball() { return { ...ball.p, state: ball.state, lie: ball.lie }; },
     get fps() { return perf.fps; }, get fpsHistory() { return perf.history.slice(); }, get frameMs() { return { update: +perf.upd.toFixed(2), render: +perf.ren.toFixed(2) }; }, info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }), get quality() { return qLevel; }, get tierChanges() { return tierChanges; }, autoStart, get weather() { return weather; }, errors,
-    get yaw() { return G.yaw; }, get club() { return G.club; }, W0, camera, renderer, scene,
+    get yaw() { return G.yaw; }, get preview() { return G.preview; }, get pvZoom() { return G.pvZoom; }, togglePreview, previewLand, get club() { return G.club; }, W0, camera, renderer, scene,
     hole: { par: PAR, yd: HOLE_YD, m: HOLE_M },
     surfaceAt, autoClub: () => autoClub(),
     // put the ball down anywhere and set up the shot (auto club) as if it had come to rest there
