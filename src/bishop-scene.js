@@ -39,7 +39,7 @@ const bsearch = (arr, v) => { let lo = 0, hi = arr.length - 2; while (lo < hi) {
 // what a patch of hillside is covered with, from its real elevation, slope, aspect and whether it sits in a draw
 const COL = {
   gold0: [0.48, 0.38, 0.21], gold1: [0.62, 0.51, 0.31], green: [0.3, 0.32, 0.14], oak: [0.1, 0.13, 0.06], chap: [0.22, 0.24, 0.13],
-  rock: [0.43, 0.43, 0.42], rock2: [0.56, 0.55, 0.52], town: [0.3, 0.32, 0.22],
+  rock: [0.41, 0.37, 0.3], rock2: [0.55, 0.5, 0.41], lichen: [0.5, 0.4, 0.24], joint: [0.26, 0.24, 0.21], town: [0.3, 0.32, 0.22],
 };
 const mix3 = (c, d, t) => { c[0] += (d[0] - c[0]) * t; c[1] += (d[1] - c[1]) * t; c[2] += (d[2] - c[2]) * t; };
 export function landColor(x, z, out) {
@@ -70,6 +70,7 @@ export function landColor(x, z, out) {
   const rockO = (sstep(330, 380, elev) * (1 - sstep(150, 300, rc)) + sstep(320, 370, elev) * (1 - sstep(150, 300, rch))) * sstep(0.45, 0.8, slope + n3 * 0.3) * 0.6;
   // weathered granite: pale where the slabs are bare, darker in the joints and lichen, so the crown reads as broken rock
   const rk = [COL.rock[0], COL.rock[1], COL.rock[2]]; mix3(rk, COL.rock2, sstep(0.35, 0.7, n3 * 0.7 + n2 * 0.5 - 0.1));
+  mix3(rk, COL.lichen, sstep(0.55, 0.8, n2 * 0.8 - n3 * 0.4 + 0.3) * 0.45); mix3(rk, COL.joint, sstep(0.25, 0.05, n3 * 0.7 + n2 * 0.5 - 0.1) * 0.6);
   mix3(out, rk, Math.min(0.95, rockB + rockO));
   return h;
 }
@@ -159,8 +160,8 @@ export function createBishopKnobs(detail = 1) {
       p.setXYZ(i, wx, wy, wz);
       if (vy > 0.4) crest.push(new THREE.Vector3(wx, wy, wz));
       const s = fbm3(vx * 3 + si, vy * 3, vz * 3, 2), lichen = sstep(0.55, 0.75, fbm3(vx * 5 + 7, vy * 5, vz * 5 + si, 2)), shade = vy < -0.2 ? 0.75 : 1;
-      const gr = (0.4 + s * 0.2) * shade;
-      col.push(lerp(gr * 0.97, 0.52, lichen * 0.35), lerp(gr, 0.5, lichen * 0.35), lerp(gr * 0.96, 0.34, lichen * 0.35));
+      const gr = (0.38 + s * 0.2) * shade;   // warm tan-grey granite, darker in the joints underneath, orange lichen patches
+      col.push(lerp(gr * 1.04, 0.52, lichen * 0.4), lerp(gr * 0.96, 0.4, lichen * 0.4), lerp(gr * 0.83, 0.22, lichen * 0.4));
     }
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); parts.push(toNonIndexed(g));
   };
@@ -385,7 +386,7 @@ export function createGranite(count) {
     if (fbm(x * 0.04, z * 0.04 + 3) < 0.55 && R() > 0.12) return null;
     pp.set(x, hgt - 0.1, z); e.set(R() * 0.5, R() * 6.28, R() * 0.5); q.setFromEuler(e);
     const sc = 0.3 + R() * R() * 1.5; s.set(sc * (1 + R() * 0.6), sc, sc);
-    const k = 0.42 + R() * 0.16; c.setRGB(k, k * 0.96, k * 0.88); return { color: true };
+    const k = 0.4 + R() * 0.16; c.setRGB(k * 1.03, k * 0.95, k * 0.82); return { color: true };
   });
 }
 

@@ -1063,7 +1063,7 @@ if (TEST) {
       for (let i = 0; i < 40000; i++) {
         const a = Math.random() * 6.28, r = Math.sqrt(Math.random()) * 900, x = L.x + Math.cos(a) * r, z = L.z + Math.sin(a) * r;
         const e = bishop.elevAt(x, z), f = (e - v0) / (top - v0); landColor(x, z, c);
-        const mx = Math.max(...c), mn = Math.min(...c), lum = (mx + mn) / 2, sat = mx > 0 ? (mx - mn) / mx : 0, grey = sat < 0.12 && lum > 0.25 && lum < 0.6;
+        const mx = Math.max(...c), mn = Math.min(...c), lum = (mx + mn) / 2, sat = mx > 0 ? (mx - mn) / mx : 0, grey = sat < 0.32 && lum > 0.2 && lum < 0.6;
         const b = f >= 0.85 ? st.sum : f < 0.5 ? st.low : null; if (b) { b[0]++; if (grey) b[1]++; }
       }
       return { summitGrey: +(st.sum[1] / st.sum[0]).toFixed(3), lowerGrey: +(st.low[1] / st.low[0]).toFixed(3), n: [st.sum[0], st.low[0]] };
