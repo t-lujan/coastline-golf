@@ -219,19 +219,20 @@ export function normalAt(x, z, e = 0.35) {
 // 0..1: inside a protected view from the tee to the Madonna Inn and the M, or from the green to Bishop Peak. Trees and
 // knolls stay out of these cones so the backdrop is not hidden behind the foreground.
 const SIGHTS = [
-  { from: [TEE.x, TEE.z], to: [LM.inn.x, LM.inn.z], hw: 6.5 },
+  // the Inn sits ~2.2 km out, past the far oaks: its cone runs (slightly wider) all the way to the building
+  { from: [TEE.x, TEE.z], to: [LM.inn.x, LM.inn.z], hw: 8, far: Math.hypot(LM.inn.x - TEE.x, LM.inn.z - TEE.z) - 60 },
   { from: [TEE.x, TEE.z], to: [LM.cerro.x, LM.cerro.z], hw: 9 },
   { from: [TEE.x, TEE.z], to: [LM.m.x, LM.m.z], hw: 5 },
   { from: [GREEN.x, GREEN.z], to: [LM.m.x, LM.m.z], hw: 5 },
   { from: [GREEN.x, GREEN.z], to: [LM.bishop.x, LM.bishop.z], hw: 17 },
   { from: [GREEN.x, GREEN.z], to: [LM.chumash.x, LM.chumash.z], hw: 12 },
-].map((r) => { const dx = r.to[0] - r.from[0], dz = r.to[1] - r.from[1], l = Math.hypot(dx, dz); return { ...r, dx: dx / l, dz: dz / l, cos: Math.cos(r.hw * RAD) }; });
+].map((r) => ({ far: 900, ...r })).map((r) => { const dx = r.to[0] - r.from[0], dz = r.to[1] - r.from[1], l = Math.hypot(dx, dz); return { ...r, dx: dx / l, dz: dz / l, cos: Math.cos(r.hw * RAD) }; });
 export function sightK(x, z) {
   let k = 0;
   for (const r of SIGHTS) {
-    const vx = x - r.from[0], vz = z - r.from[1], d = Math.hypot(vx, vz); if (d < 25 || d > 900) continue;
+    const vx = x - r.from[0], vz = z - r.from[1], d = Math.hypot(vx, vz); if (d < 25 || d > r.far) continue;
     const c = (vx * r.dx + vz * r.dz) / d;                       // cos of the angle off the sightline
-    k = Math.max(k, sstep(r.cos - 0.012, r.cos + 0.004, c) * (1 - sstep(700, 900, d)));
+    k = Math.max(k, sstep(r.cos - 0.012, r.cos + 0.004, c) * (1 - sstep(r.far - 200, r.far, d)));
   }
   return k;
 }

@@ -354,8 +354,9 @@ function aimPose(club = G.club, yaw = G.yaw) {
   const cx = p.x - dx * back, cz = p.z - dz * back;
   const pos = new V3(cx, Math.max(p.y, heightAt(cx, cz) + 0.6, 0.6) + h + (onTee ? 1.2 : 0), cz);
   const ahead = putt ? Math.max(2.5, Math.min(7, distToCup())) : Math.min(130, Math.max(60, distToCup() * 0.6));
-  // on Bishop Peak the tee view is turned a little toward the Madonna Inn and the M so they sit in frame, not at the edge
-  const bias = BISHOP && onTee ? 0.31 * ahead : 0;
+  // on Bishop Peak the tee view is turned a little toward the Madonna Inn and the M so they sit in frame, not at the edge;
+  // a landscape frame is wide enough for the Inn (27° left) and Cerro San Luis with its M (25° right) both, so it turns less
+  const bias = BISHOP && onTee ? (camera.aspect > 1 ? 0.1 : 0.31) * ahead : 0;
   const lx = p.x + dx * ahead + dz * bias, lz = p.z + dz * ahead - dx * bias;
   const lk = new V3(lx, putt ? heightAt(lx, lz) : Math.max(onTee ? 0 : p.y, heightAt(lx, lz)) + 2.2 + ahead * 0.012, lz);
   return { pos, look: lk };
