@@ -91,10 +91,10 @@ function channelMask(x, z) { return sstep(CHANNEL.halfW + 9, CHANNEL.halfW - 2, 
 
 export function greenHeight(x, z) {
   // gentle back-to-front and right-to-left tilt, and two tiers: the back-right (where the pin is) sits ~16 cm above the
-  // front, joined by a soft 7 m ramp running diagonally across the green. Putts up or down it break and need pace.
+  // front, joined by a soft 10 m ramp running diagonally across the green. Putts up or down it break and need pace.
   const lx = x - GREEN.x, lz = z - GREEN.z;
   const u = (2.4 - 0.3 * lx) - lz;   // > 0: behind the ramp's centre line
-  return 3.0 - lz * 0.008 + lx * 0.005 + 0.16 * sstep(-3.5, 3.5, u) + 0.07 * Math.exp(-((lx + 7) ** 2 + (lz - 6) ** 2) / 40);
+  return 3.0 - lz * 0.012 + lx * 0.008 + 0.14 * sstep(-5, 5, u) + 0.04 * Math.exp(-((lx + 7) ** 2 + (lz - 6) ** 2) / 40);
 }
 // the fairway climbs gently (~2%) from the inlet through the landing zone, so the landing zone is shown to the tee,
 // to a low ridge that crosses at an angle just past the dogleg corner, then runs down (~4%) to the green
