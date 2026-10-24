@@ -2,12 +2,12 @@
 import { heightAt, normalAt, surfaceAt, greenDist, CUP } from './course.js';
 
 export const BALL_R = 0.0214;
-// check: how much of the ball's along-ground speed survives the first bounces (backspin bites); bite: extra
+// spin: backspin that bites on a green (see impact); check: how much of the ball's along-ground speed survives the first bounces (backspin bites); bite: extra
 // rolling friction (m/s^2) while that spin wears off over the first second on the ground
 export const CLUBS = {
-  driver: { name: 'Driver', vmax: 76, launch: 12.5, lift: 0.0024, spinDecay: 7, check: 1, bite: 0 },
-  iron:   { name: 'Iron',   vmax: 49, launch: 23,   lift: 0.0026, spinDecay: 5, check: 1, bite: 0 },
-  wedge:  { name: 'Wedge',  vmax: 35, launch: 33,   lift: 0.0030, spinDecay: 4, check: 0.4, bite: 2.2 },
+  driver: { name: 'Driver', vmax: 76, launch: 12.5, lift: 0.0024, spinDecay: 7, check: 1, bite: 0, spin: 0 },
+  iron:   { name: 'Iron',   vmax: 49, launch: 23,   lift: 0.0026, spinDecay: 5, check: 1, bite: 0, spin: 0.1 },
+  wedge:  { name: 'Wedge',  vmax: 35, launch: 33,   lift: 0.0030, spinDecay: 4, check: 0.4, bite: 2.2, spin: 0.65 },
   putter: { name: 'Putter', vmax: 6.5, launch: 0,    lift: 0,      spinDecay: 1, check: 1, bite: 0 },
 };
 export const SURF = {
@@ -93,9 +93,11 @@ export class Ball {
     if (dc < 0.16 && Math.hypot(v.x, v.y, v.z) < 9) { this.hole(); return; }
     const S = SURF[surf], n = normalAt(p.x, p.z);
     // spin checks the ball on its first two bounces (on soft sand it plugs anyway)
-    const chk = this.bounces < 2 ? this.club.check : 1; this.bounces++;
     const vn = v.x * n.x + v.y * n.y + v.z * n.z;
     const tx = v.x - n.x * vn, ty = v.y - n.y * vn, tz = v.z - n.z * vn;
+    // on a green the check comes from the shot: more spin and a steeper descent grab, a flat low-spin one runs on
+    const steep = Math.min(1.3, Math.max(0, (Math.atan2(-vn, Math.hypot(tx, tz)) * 180 / Math.PI - 12) / 30));
+    const chk = this.bounces < 2 ? (surf === 'green' ? 1.15 - (this.club.spin + 0.15) * steep : this.club.check) : 1; this.bounces++;
     p.y = gy;
     this.events.push({ type: 'impact', surf, speed: -vn, at: { ...p } });
     if (-vn > 1.6 && surf !== 'sand') {

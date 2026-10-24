@@ -283,7 +283,7 @@ function tweenTo(pose, dur) { cam.from = { pos: camera.position.clone(), look: c
 
 function prepareShot(dur = 1.6) {
   G.yaw = yawTo(CUP.x, CUP.z);
-  if (!G.manualClub) setClub(autoClub());
+  if (!G.manualClub || ball.lie === 'green') setClub(autoClub());
   G.manualClub = false;
   tweenTo(aimPose(), dur);
   G.state = 'aim';
@@ -512,7 +512,7 @@ function updateAim() {
     land = { x: ball.p.x + Math.sin(s.yaw) * len, z: ball.p.z - Math.cos(s.yaw) * len };
     $('power-label').textContent = `${CLUBS[G.club].name} · ${Math.round(s.power * 100)}% · carry ${yd(len)} yd`;
   }
-  W0.aimLine.set(groundLine(ball.p, s.yaw, len, G.club === 'putter' ? 0.25 : Math.max(0.5, len / 150)));
+  if (G.club === 'putter') W0.aimLine.set(groundLine(ball.p, s.yaw, len, 0.25)); else W0.aimLine.set([]);
   W0.marker.visible = true; W0.marker.position.set(land.x, Math.max(0.05, heightAt(land.x, land.z)) + 0.08, land.z);
 }
 for (const b of document.querySelectorAll('#clubs button')) b.addEventListener('click', () => { if (G.state !== 'aim') return; setClub(b.dataset.club, true); tweenTo(aimPose(), 0.6); });
