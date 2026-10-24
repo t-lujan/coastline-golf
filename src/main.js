@@ -354,9 +354,9 @@ function aimPose(club = G.club, yaw = G.yaw) {
   const cx = p.x - dx * back, cz = p.z - dz * back;
   const pos = new V3(cx, Math.max(p.y, heightAt(cx, cz) + 0.6, 0.6) + h + (onTee ? 1.2 : 0), cz);
   const ahead = putt ? Math.max(2.5, Math.min(7, distToCup())) : Math.min(130, Math.max(60, distToCup() * 0.6));
-  // on Bishop Peak the tee view is turned a little toward the Madonna Inn and the M so they sit in frame, not at the edge;
-  // a landscape frame is wide enough for the Inn (27° left) and Cerro San Luis with its M (25° right) both, so it turns less
-  const bias = BISHOP && onTee ? (camera.aspect > 1 ? 0.1 : 0.31) * ahead : 0;
+  // on Bishop Peak the tee view is turned a little left toward Cerro San Luis (~18° left of the aim line) and its M (~4° left)
+  // so they sit in frame; a portrait frame turns ~8° so Cerro fits inside its left edge while the aim line stays well in view
+  const bias = BISHOP && onTee ? (camera.aspect > 1 ? 0.1 : 0.14) * ahead : 0;
   const lx = p.x + dx * ahead + dz * bias, lz = p.z + dz * ahead - dx * bias;
   const lk = new V3(lx, putt ? heightAt(lx, lz) : Math.max(onTee ? 0 : p.y, heightAt(lx, lz)) + 2.2 + ahead * 0.012, lz);
   return { pos, look: lk };
@@ -543,19 +543,19 @@ function buildFlyover() {
   const end = aimPose('driver', G.yaw), e = end.pos, l = end.look;
   const c = cupPos(), R = ROCK, k = 0.9;   // k: overall pace (seconds per key-time unit)
   if (BISHOP) {
-    // from above the corner, out toward Bishop Peak, then past the green on its tee side and back down to the tee
-    // camera: the heading turns one way only (from the mountain round to the first fairway) and the view never tips up
-    const G0 = GREEN, f = (t, x, y, z, lx, ly, lz) => [t * k, x, y, z, lx, ly, lz];
+    // from high south-west of the green, round it clockwise (always looking at the flag), back down the hole and onto the
+    // tee camera: the heading only ever turns one way (right, ~200°), so by the tee it is already turned onto the Madonna
+    // Inn behind it, and the view tips up just once (from looking down on the green to level at the tee)
+    const f = (t, x, y, z, lx, ly, lz) => [t * k, x, y, z, lx, ly, lz];
     const keys = [
-      f(0.0, -60, 88, 58, G0.x + 520, 80, G0.z - 100),
-      f(2.7, 30, 62, 24, G0.x + 260, 46, G0.z - 58),
-      f(5.0, 118, 37, 22, G0.x + 30, 23, G0.z - 22),     // settle over the green a little high and aimed a little low,
-      f(6.9, 176, 31, 42, c.x + 12, c.y, c.z - 8),       // so the view keeps tipping down onto the flag: one dip, then level out
-      f(8.8, 130, 34, 122, 134, heightAt(134, 22) + 1, 22),
-      f(10.4, 70, 30, 212, 52, heightAt(52, 70) + 1, 70),   // already leaning left: the heading keeps turning one way onto the Inn
+      f(0.0, -300, 95, 120, c.x, c.y, c.z),
+      f(2.8, -260, 70, -40, c.x, c.y, c.z),
+      f(5.2, -150, 50, -150, c.x, c.y, c.z + 10),
+      f(7.6, -20, 42, -60, -40, 14, 120),
+      f(10.0, 30, 30, 120, -20, 18, 260),
       f(12.6, ...panPos(0, true).toArray(), ...panLook(0)),   // lands on the tee camera already turned onto the Madonna Inn: the opening pan takes over
     ];
-    fly.path = keyPath(keys); fly.dur = keys[keys.length - 1][0];
+    fly.path = keyPath(keys); fly.dur = keys[keys.length - 1][0]; fly.keys = keys;
     return;
   }
   // the heading only ever turns one way (from the Rock round to the fairway), the view tips down once onto the green
@@ -571,18 +571,25 @@ function buildFlyover() {
   ].map(([t, ...r]) => [t * k, ...r]);
   fly.path = keyPath(keys); fly.dur = keys[keys.length - 1][0];
 }
-// the opening pan on Bishop Peak: from the tee camera the view starts on the Madonna Inn, sweeps right to Cerro San Luis
-// and its M, holds a beat and settles back on the tee aim view. Only the heading turns (position and pitch stay those of
-// the tee camera), each leg eased in and out, so there is no pitch wobble and the last frame is exactly aimPose()
-const pan = { t: 0, dur: 4.6, legs: null, pos: null, R: 1, pitch: 0, lift: 16 };
+// the opening pan on Bishop Peak: from the tee camera, turned round onto the Madonna Inn behind the tee (zoomed in so it
+// reads large), the view sweeps right (the shorter way) round to Cerro San Luis and its M with Bishop Peak beside it, holds
+// a beat and settles on the tee aim view. Only the heading turns (pitch stays that of the tee camera), each leg eased in
+// and out, so there is no pitch wobble and the last frame is exactly aimPose()
+const pan = { t: 0, dur: 4.8, legs: null, pos: null, R: 1, pitch: 0, lift: 16, fov0: 36, zoomEnd: 2.6 };
 const hdg = (x, z) => Math.atan2(x, -z), wrapA = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 function buildPan() {
   const a = aimPose('driver', G.yaw), v = a.look.clone().sub(a.pos), LM = bishop.LM;
   pan.pos = a.pos; pan.R = v.length(); pan.pitch = Math.asin(v.y / pan.R);
   const h2 = hdg(v.x, v.z), at = (o) => h2 + wrapA(hdg(o.x - a.pos.x, o.z - a.pos.z) - h2);
-  const h0 = at(LM.inn), h1 = (at(LM.cerro) + at(LM.m)) / 2;
-  pan.legs = [[0, 2.0, h0, h1], [2.0, 2.5, h1, h1], [2.5, pan.dur, h1, h2]];
+  const h0 = at(innMid()), h1 = (at(LM.cerro) + at(LM.m)) / 2;
+  pan.legs = [[0, 0.6, h0, h0], [0.6, 2.6, h0, h1], [2.6, 3.1, h1, h1], [3.1, pan.dur, h1, h2]];
 }
+// the lens: narrow on the Inn, easing out to the normal field of view by the time the sweep reaches Cerro San Luis
+function panFov(t) { const u = Math.max(0, Math.min(1, t / pan.zoomEnd)), s = u * u * u * (u * (u * 6 - 15) + 10); return pan.fov0 + (baseFov - pan.fov0) * s; }
+function setFov(f) { if (Math.abs(camera.fov - f) > 1e-4) { camera.fov = f; camera.updateProjectionMatrix(); } }
+function applyPan(t) { camera.position.copy(panPos(t)); cam.look.set(...panLook(t)); camera.lookAt(cam.look); setFov(panFov(t)); }
+// the middle of the Inn complex as drawn (its wings spread east of the landmark point)
+function innMid() { const m = W0.inn; if (!m) return bishop.LM.inn; m.updateMatrixWorld(true); if (!m.geometry.boundingBox) m.geometry.computeBoundingBox(); return m.geometry.boundingBox.getCenter(new V3()).applyMatrix4(m.matrixWorld); }
 function panLook(t, fresh) {
   if (fresh || !pan.legs) buildPan();
   const L = pan.legs.find((g) => t <= g[1]) || pan.legs[pan.legs.length - 1], u = Math.max(0, Math.min(1, (t - L[0]) / (L[1] - L[0])));
@@ -593,8 +600,7 @@ function panLook(t, fresh) {
 function panPos(t, fresh) { if (fresh || !pan.legs) buildPan(); const u = Math.max(0, Math.min(1, t / pan.dur)), s = u * u * u * (u * (u * 6 - 15) + 10); return tmpP.copy(pan.pos).setY(pan.pos.y + pan.lift * (1 - s)); }
 const tmpP = new V3();
 function startPan() {
-  buildPan(); pan.t = 0; G.state = 'pan';
-  camera.position.copy(panPos(0)); cam.look.set(...panLook(0)); camera.lookAt(cam.look); cam.to = null;
+  buildPan(); pan.t = 0; G.state = 'pan'; cam.to = null; applyPan(0);
 }
 function startFlyover() {
   buildFlyover();
@@ -610,7 +616,7 @@ function endFlyover(quick) {
   toAim(quick ? 0.9 : 1.4);
 }
 // skipping the pan (tap / click / any key) cuts straight to the tee aim view
-function endPan() { G.yaw = aimYaw(); const a = aimPose(); camera.position.copy(a.pos); cam.look.copy(a.look); camera.lookAt(cam.look); toAim(0); }
+function endPan() { G.yaw = aimYaw(); const a = aimPose(); camera.position.copy(a.pos); cam.look.copy(a.look); camera.lookAt(cam.look); setFov(baseFov); toAim(0); }
 function toAim(dur) {
   if (dur > 0) tweenTo(aimPose(), dur); else cam.to = null;
   G.state = 'aim'; $('hud').hidden = false;
@@ -968,16 +974,18 @@ function holeOutPickup() {
 }
 
 function updateCamera(rdt, dt) {
-  if (G.state !== 'holed' && G.state !== 'end') lens(baseFov, damp(4, rdt));
+  if (G.state !== 'holed' && G.state !== 'end' && !(BISHOP && (G.state === 'flyover' || G.state === 'pan'))) lens(baseFov, damp(4, rdt));
   if (cam.free) { camera.position.set(cam.free[0], cam.free[1], cam.free[2]); camera.lookAt(cam.free[3], cam.free[4], cam.free[5]); return; }
   if (G.state === 'flyover') {
     fly.t += rdt;
     fly.path(fly.t, camera.position, cam.look); camera.lookAt(cam.look);
+    // on Bishop Peak the lens narrows over the last leg onto the Inn, so the pan's first frame (fov included) follows on exactly
+    if (BISHOP) { const u = Math.max(0, Math.min(1, (fly.t - fly.dur + 2.2) / 2.2)), s = u * u * (3 - 2 * u); setFov(baseFov + (pan.fov0 - baseFov) * s); }
     if (fly.t > fly.dur) endFlyover(false);
     return;
   }
   if (G.state === 'pan') {
-    pan.t += rdt; camera.position.copy(panPos(pan.t)); cam.look.set(...panLook(pan.t)); camera.lookAt(cam.look);
+    pan.t += rdt; applyPan(pan.t);
     if (pan.t >= pan.dur) endPan();
     return;
   }
@@ -1166,6 +1174,7 @@ if (TEST) {
     advance: (sec, step = 1 / 30) => { for (let t = 0; t < sec; t += step) update(step); post.render(); },
     flyAt: (sec) => { fly.t = sec; },
     // the intro path sampled at n even time steps: [x, y, z, lookX, lookY, lookZ, ground height under the camera]
+    get flyKeys() { if (!fly.path) buildFlyover(); return fly.keys; },
     flyPath: (n = 240) => {
       if (!fly.path) buildFlyover();
       const p = new V3(), l = new V3(), pts = [];
@@ -1177,7 +1186,11 @@ if (TEST) {
     skip: () => { if (G.state === 'flyover') endFlyover(true); else if (G.state === 'pan') endPan(); },
     // the opening pan (Bishop only): play it from the tee, hold it at a time, or read it
     playPan: () => { if (BISHOP) { G.yaw = aimYaw(); setClub(autoClub()); $('hud').hidden = true; startPan(); } return G.state; },
-    panAt: (sec) => { pan.t = sec; }, panLift: (m) => { pan.lift = m; }, heightAt,
+    // the landmarks in world space (summit / M height on the drawn terrain) and the clearance of the sightline to a point
+    lmWorld: () => BISHOP ? Object.fromEntries(Object.entries(bishop.LM).map(([k, v]) => [k, [v.x, k === 'm' || k === 'inn' ? heightAt(v.x, v.z) + 5 : bishop.yOf(v.elev, v.x, v.z), v.z]])) : null,
+    sightline: (x, y, z) => { const c = camera.position; let m = 1e9; for (let i = 1; i < 194; i++) { const f = i / 200, px = c.x + (x - c.x) * f, pz = c.z + (z - c.z) * f; m = Math.min(m, c.y + (y - c.y) * f - heightAt(px, pz)); } return m; },
+    get fov() { return camera.fov; },
+    panAt: (sec) => { pan.t = sec; if (G.state === 'pan') applyPan(sec); }, panLift: (m) => { pan.lift = m; }, heightAt,
     get panState() { return { t: pan.t, dur: pan.dur, active: G.state === 'pan', legs: pan.legs, pos: pan.pos && pan.pos.toArray() }; },
     finishMove: () => { if (cam.to) { cam.tt = cam.dur; } },
     placeNearCup: (d = 0.9) => {
