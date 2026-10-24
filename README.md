@@ -1,6 +1,9 @@
-# Coastline Golf · Hole 1: Morro Rock
+# Coastline Golf · Hole 1: Morro Rock and Bishop Peak
 
-One signature par 4 on the San Luis Obispo coast, built with three.js. You tee off over a tidal inlet and play up a links fairway toward Morro Rock. The weather is live from Morro Bay, and the light comes from the real California sun.
+Two holes in San Luis Obispo county, built with three.js, with a map picker on the start screen (your last choice is remembered).
+
+- **Morro Rock**: a par 4 on the coast. You tee off over a tidal inlet and play up a links fairway toward Morro Rock. The weather is live from Morro Bay, and the light comes from the real California sun there.
+- **Bishop Peak**: a par 5 in the San Luis Obispo valley, a dogleg right with Bishop Peak's rocky summit rising behind the green, Cerro San Luis Obispo with its white "M" off to one side, the Madonna Inn at its foot, the lower morros of the Nine Sisters fading into haze, coast live oak woodland, golden grass, chaparral, two fairway and two greenside bunkers and a pond. Weather and sun use the hole's own latitude and longitude (35.2845, -120.6685).
 
 **Play:** pull back and release to swing. Drag sideways to aim; a longer pull gives more power. On desktop, drag with the mouse the same way. The arrow keys fine-tune aim, and 1 / 2 / 3 switch clubs.
 
@@ -34,6 +37,11 @@ One signature par 4 on the San Luis Obispo coast, built with three.js. You tee o
 | `weather` | `fog`, `clear`, `windy`, `rain`, `offline` (overrides on top of the live data) |
 | `quality` | `auto`, `high`, `med`, `low` |
 | `nofly` | skip the opening flyover |
+| `map` | `morro` or `bishop` (overrides the saved choice) |
+
+## Real-world mapping (Bishop Peak)
+
+The hole site (the dogleg corner) is the world origin. Bishop Peak (472 m), Cerro San Luis Obispo (393 m) with the white "M" on its east face, the Madonna Inn, Chumash Peak and Cerro Romualdo stand at their true compass bearings and distances from it, on real elevation baked from the free, no-key AWS Terrarium tiles. `node scripts/bake-heightmap.mjs` writes two PNGs: `src/maps/bishop-height.png` (1024 px over 10 km from zoom-14 tiles, ~10 m a pixel, covering Bishop Peak, Chumash Peak, Cerro San Luis and Laguna Lake) and `src/maps/bishop-height-far.png` (256 px over 30 km for the rest of the Nine Sisters and the hills in the haze). The backdrop is meshed straight from them: a fine grid over the peaks the hole looks at, a coarse far ring beyond. Relief is true to life within ~1.2 km and drawn 1.2x beyond ~2.8 km so the far morros still stand up over the near foothills. The playable hole follows a smooth fit of the real valley floor (the approach climbs to a green at the foot of Cerro San Luis's north spur) and blends into the data within ~650 m. The M is real scale (~36 m) and lies on the slope; the Madonna Inn is drawn 1.6x life size so it reads from the tee about 2 km away. If the PNGs cannot be loaded, the peaks fall back to smooth cones at their true positions and heights.
 
 ## Develop
 
@@ -46,4 +54,4 @@ npm run preview
 
 ## Credits
 
-Made by [Tyler Lujan](https://t-lujan.github.io) · [github.com/t-lujan](https://github.com/t-lujan). Weather data by Open-Meteo (CC BY 4.0). MIT licensed.
+Made by [Tyler Lujan](https://t-lujan.github.io) · [github.com/t-lujan](https://github.com/t-lujan). Weather data by Open-Meteo (CC BY 4.0). Elevation data: Mapzen Terrain Tiles / AWS Open Data (includes USGS 3DEP/SRTM data). MIT licensed.

@@ -3,7 +3,8 @@
 // coast live oak, a few windswept cypress). Sway lives in the vertex shader.
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import { heightAt, surfaceAt, fairwayDist, greenDist, bunkerDist, wasteDist, sandiness, duneSand, teeDist, inland, fbm, FAIRWAY_HALF, HEADING, ROCK, BOUNDS, TEE, GREEN } from './course.js';
+import { heightAt, surfaceAt, fairwayDist, greenDist, bunkerDist, wasteDist, sandiness, duneSand, teeDist, inland, fbm, FAIRWAY_HALF, HEADING, ROCK, BOUNDS, TEE, GREEN, MAP_ID } from './course.js';
+import { pondDist, sightK } from './maps/bishop.js';
 import { fbm3, rimUniforms, tameUniforms, GLSL_RIM_DECL, GLSL_RIM, GLSL_NOISE } from './noise.js';
 
 export const windUniforms = { uTime: { value: 0 }, uWind: { value: new THREE.Vector2(1, 0) }, uGust: { value: 0.5 } };
@@ -13,7 +14,7 @@ export const leafUniforms = { uLeafGlow: { value: new THREE.Color(0, 0, 0) }, uR
 // deterministic random so the course is the same every visit
 export function rng(seed) { return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
-function swayMaterial(mat, strength, heightScale, { flatNormal = false, rim = false, foliage = false, holes = 0, ragged = true } = {}) {
+export function swayMaterial(mat, strength, heightScale, { flatNormal = false, rim = false, foliage = false, holes = 0, ragged = true } = {}) {
   mat.onBeforeCompile = (sh) => {
     if (rim) { Object.assign(sh.uniforms, rimUniforms); sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>\n${GLSL_RIM_DECL}`); }
     if (foliage) {
@@ -63,12 +64,12 @@ function swayMaterial(mat, strength, heightScale, { flatNormal = false, rim = fa
   };
   return mat;
 }
-const colorize = (g, fn) => { const p = g.attributes.position, a = []; for (let i = 0; i < p.count; i++) a.push(...fn(p.getX(i), p.getY(i), p.getZ(i))); g.setAttribute('color', new THREE.Float32BufferAttribute(a, 3)); return g; };
-const strip = (g) => { g = g.index ? g.toNonIndexed() : g; for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'color'].includes(k)) g.deleteAttribute(k); return g; };
-const posOnly = (g) => { g = g.index ? g.toNonIndexed() : g; for (const k of Object.keys(g.attributes)) if (k !== 'position') g.deleteAttribute(k); return mergeVertices(g); };
-const nearPlay = (x, z) => Math.min(fairwayDist(x, z) - FAIRWAY_HALF, greenDist(x, z), teeDist(x, z));
+export const colorize = (g, fn) => { const p = g.attributes.position, a = []; for (let i = 0; i < p.count; i++) a.push(...fn(p.getX(i), p.getY(i), p.getZ(i))); g.setAttribute('color', new THREE.Float32BufferAttribute(a, 3)); return g; };
+export const strip = (g) => { g = g.index ? g.toNonIndexed() : g; for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'color'].includes(k)) g.deleteAttribute(k); return g; };
+export const posOnly = (g) => { g = g.index ? g.toNonIndexed() : g; for (const k of Object.keys(g.attributes)) if (k !== 'position') g.deleteAttribute(k); return mergeVertices(g); };
+export const nearPlay = (x, z) => Math.min(fairwayDist(x, z) - FAIRWAY_HALF, greenDist(x, z), teeDist(x, z));
 
-function scatter(mesh, count, rand, place) {
+export function scatter(mesh, count, rand, place) {
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), c = new THREE.Color(), e = new THREE.Euler();
   let n = 0, tries = 0;
   while (n < count && tries < count * 40) {
@@ -238,7 +239,7 @@ function bough(parts, pts, r0, r1, col, seg) {
 // a lumpy foliage tuft: sunlit top, darker body, dark underside, AO toward the crown centre. Normals are pulled
 // toward the centre of the tuft's branch cluster and of the whole crown (nrm: [[x, y, z, weight], ...]) so the
 // canopy shades as one soft volume broken into clumps rather than a stack of flat pads.
-function clump(c, rx, ry, rz, seed, pal, { detail = 1, flat = 0.8, droop = 0.7, ao = null, nrm = null, lift = 0.25, band = null } = {}) {
+export function clump(c, rx, ry, rz, seed, pal, { detail = 1, flat = 0.8, droop = 0.7, ao = null, nrm = null, lift = 0.25, band = null } = {}) {
   const g = posOnly(new THREE.IcosahedronGeometry(1, detail));
   const p = g.attributes.position, col = [];
   for (let i = 0; i < p.count; i++) {
@@ -415,7 +416,8 @@ function eucGeometry(seed, { far = false } = {}) {
   return parts;
 }
 
-function oakGeometry(seed, { far = false } = {}) {
+function oakGeometry(seed, { far = false, dome = false } = {}) {
+  if (dome) return oakDome(seed, far);
   // low and wide: a short trunk, gnarled limbs that spread and dip, and a dense rounded canopy that skirts down at the edges
   const R = rng(seed), parts = [], top = [0.45, 2.0, 0];
   bough(parts, [[0, -0.4, 0], [0.3, 1.1, 0.1], top], 0.85, 0.6, oakBark, far ? 6 : 9);
@@ -431,6 +433,25 @@ function oakGeometry(seed, { far = false } = {}) {
     const rr = Math.sqrt((i + 0.5) / nt), a = i * 2.39996 + R() * 0.4, r = rr * 6.4;
     const y = 6.9 - rr * rr * 3.6 + (R() - 0.5) * 0.7, s = (1.45 + (1 - rr) * 0.6 + R() * 0.55) * f;
     parts.push(clump([top[0] + Math.cos(a) * r, y, Math.sin(a) * r * 0.92], s * 1.15, s * 0.8, s * 1.1, seed + i * 2.9, PAL.oak, { detail: far ? 0 : 1, flat: 0.8, droop: 0.65, ao, nrm: [cc] }));
+  }
+  return parts;
+}
+
+// the inland coast live oak (Bishop Peak): a broad, dark, rounded dome that skirts almost to the ground, the short trunk
+// and limbs mostly hidden inside it
+function oakDome(seed, far) {
+  const R = rng(seed + 5), parts = [], top = [0.3, 1.6, 0];
+  bough(parts, [[0, -0.4, 0], [0.2, 0.9, 0.05], top], 0.8, 0.55, oakBark, far ? 6 : 8);
+  for (let i = 0; i < 5; i++) {
+    const a = i / 5 * 6.28 + R() * 0.5, r = 3.2 + R() * 1.2, pts = [top];
+    for (let k = 1; k <= 3; k++) { const f = k / 3; pts.push([top[0] + Math.cos(a) * r * f, top[1] + Math.sin(f * 2.2) * 2.4 + (R() - 0.5) * 0.3, top[2] + Math.sin(a) * r * f]); }
+    bough(parts, pts, 0.36, 0.1, oakBark, far ? 4 : 6);
+  }
+  const cc = [top[0], 4.2, 0, 1.2], ao = [top[0], 5.2, 0, 6.5], nt = far ? 18 : 40, f = far ? 1.4 : 1;
+  for (let i = 0; i < nt; i++) {
+    const rr = Math.sqrt((i + 0.5) / nt), a = i * 2.39996 + R() * 0.4, r = rr * 6.6;
+    const y = 7.4 - rr * rr * 4.6 + (R() - 0.5) * 0.6, s = (1.6 + (1 - rr) * 0.7 + R() * 0.5) * f;
+    parts.push(clump([top[0] + Math.cos(a) * r, y, Math.sin(a) * r * 0.92], s * 1.15, s * 0.95, s * 1.1, seed + i * 2.9, PAL.oak, { detail: far ? 0 : 1, flat: 0.55, droop: 0.5, ao, nrm: [cc] }));
   }
   return parts;
 }
@@ -451,7 +472,7 @@ function cypressGeometry(seed, { far = false } = {}) {
   return parts;
 }
 
-function mergeTree(parts) {
+export function mergeTree(parts) {
   return mergeGeometries(parts.map((p) => { const q = p.index ? p.toNonIndexed() : p; for (const k of Object.keys(q.attributes)) if (!['position', 'normal', 'color'].includes(k)) q.deleteAttribute(k); return q; }));
 }
 
@@ -519,6 +540,50 @@ function treeSpots() {
   return spots.filter((t) => bunkerDist(t.x, t.z) > 3 && wasteDist(t.x, t.z) > 2);
 }
 
+
+// Bishop Peak: coast live oak woodland in clumps beside the hole and on the knolls, kept out of the sightlines to the
+// mountains and the Inn (see sightK) so the backdrop reads from the tee and from the green
+function treeSpotsBishop() {
+  const R = rng(77), spots = [];
+  const ok = (x, z, clear) => {
+    const s = surfaceAt(x, z); if (s === 'water' || s === 'green' || s === 'tee') return false;
+    if (nearPlay(x, z) < clear || pondDist(x, z) < 7 || sightK(x, z) > 0.3) return false;
+    return Math.hypot(x - 4, z - 292) > 14;
+  };
+  const clearOf = (x, z, minD) => !spots.some((s) => Math.hypot(s.x - x, s.z - z) < minD);
+  const grove = (cx, cz, n, rad, { minD = 10.5, clear = 9, sc = [0.75, 1.25], pri = 1 } = {}) => {
+    let placed = 0;
+    for (let t = 0; placed < n && t < n * 80; t++) {
+      const last = placed && R() < 0.6 ? spots[spots.length - 1] : null;
+      const a = R() * 6.28, r = last ? minD * (1.0 + R() * 0.4) : rad * Math.sqrt(R());
+      const x = (last ? last.x : cx) + Math.cos(a) * r, z = (last ? last.z : cz) + Math.sin(a) * r * (last ? 1 : 0.8);
+      if (!ok(x, z, clear) || !clearOf(x, z, minD)) continue;
+      spots.push({ kind: 'oak', x, z, sc: lerp(sc[0], sc[1], R()), pri: placed < Math.ceil(n * 0.5) ? pri : pri + 1 }); placed++;
+    }
+  };
+  // groves, not rows: a few framing groves where the hole needs them, then clusters of 3-9 trees seeded where oaks really
+  // grow here, in the swales and on the cooler (north-facing) side of the low rises, with crowns almost touching
+  grove(-52, 238, 6, 26, { pri: 1, minD: 9 }); grove(-70, 128, 8, 30, { pri: 1, minD: 9 }); grove(-46, 46, 4, 20, { pri: 1, minD: 9.5 });
+  grove(74, 222, 4, 20, { pri: 1, minD: 9 }); grove(-16, 340, 5, 22, { pri: 1, minD: 9 });
+  grove(64, -58, 5, 22, { pri: 1, minD: 9 }); grove(118, 36, 6, 26, { pri: 1, minD: 9 }); grove(214, 2, 4, 20, { pri: 1, minD: 9.5 });
+  const nb = HEADING * Math.PI / 180;
+  for (let t = 0, made = 0; made < 16 && t < 4000; t++) {
+    const x = -290 + R() * 620, z = -280 + R() * 640, fw = nearPlay(x, z); if (fw < 26) continue;
+    const e = 12, hx = (heightAt(x + e, z) - heightAt(x - e, z)) / (2 * e), hz = (heightAt(x, z + e) - heightAt(x, z - e)) / (2 * e), sl = Math.hypot(hx, hz);
+    const ring = (heightAt(x + 30, z) + heightAt(x - 30, z) + heightAt(x, z + 30) + heightAt(x, z - 30)) / 4, curv = ring - heightAt(x, z);
+    const north = sl > 0.02 ? (hx * Math.sin(nb) + hz * Math.cos(nb)) / sl : 0;
+    if (curv * 0.8 + north * 0.6 + fbm(x * 0.01 + 3, z * 0.01) - 0.5 < 0.15 || !ok(x, z, 22)) continue;
+    grove(x, z, 3 + Math.floor(R() * 7), 18, { pri: made % 3 === 0 ? 2 : 3, minD: 8.5 + R() * 2.5, clear: 20 }); made++;
+  }
+  // a few lone oaks out in the grass
+  for (let t = 0, n = 0; n < 14 && t < 3000; t++) {
+    const x = -300 + R() * 640, z = -260 + R() * 600;
+    if (!ok(x, z, 24) || !clearOf(x, z, 26)) continue;
+    spots.push({ kind: 'oak', x, z, sc: 0.85 + R() * 0.45, pri: 3 }); n++;
+  }
+  return spots.filter((t) => bunkerDist(t.x, t.z) > 3);
+}
+
 // soft contact shadow under each crown (one instanced draw): darkens the grass where the canopy blocks the sky
 function contactShadows(n) {
   const g = new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2), p = g.attributes.position, c = [];
@@ -532,17 +597,20 @@ const QUALITY_PRI = { high: 9, med: 2, low: 1 };
 // full-detail variants per species on each tier: every variant is a draw call plus a shadow draw, so cheaper tiers
 // share fewer shapes (the hero trees at the tee are always variant 0, so they look the same on every tier)
 const TREE_VARIANTS = { high: { pine: 3, euc: 2, oak: 1, cyp: 1 }, med: { pine: 2, euc: 2, oak: 1, cyp: 1 }, low: { pine: 1, euc: 1, oak: 1, cyp: 1 } };
+const BISHOP_VARIANTS = { high: { oak: 2 }, med: { oak: 2 }, low: { oak: 1 } };
 // each species has full-detail variants for trees near the camera and one cheap far version (same silhouette,
 // faceted tufts, no hidden twigs) that never casts shadows; trees swap between them by distance
 const KINDS = {
   pine: { geos: [() => pineGeometry(3), () => pineGeometry(17), () => pineGeometry(41, { H0: 12.5, spread: 0.85 })], far: () => pineGeometry(17, { far: true }), h: 17, sway: 0.25, shadow: 5.5, holes: 0.5 },
   euc: { geos: [() => eucGeometry(7), () => eucGeometry(29)], far: () => eucGeometry(7, { far: true }), h: 24, sway: 0.35, shadow: 4.8, holes: 0, leaves: true },
-  oak: { geos: [() => oakGeometry(11)], far: () => oakGeometry(11, { far: true }), h: 8, sway: 0.15, shadow: 7.5, holes: 0.2 },
+  oak: MAP_ID === 'bishop'
+    ? { geos: [() => oakGeometry(11, { dome: true }), () => oakGeometry(23, { dome: true })], far: () => oakGeometry(11, { far: true, dome: true }), h: 8, sway: 0.12, shadow: 7.8, holes: 0.12 }
+    : { geos: [() => oakGeometry(11), () => oakGeometry(23)], far: () => oakGeometry(11, { far: true }), h: 8, sway: 0.15, shadow: 7.5, holes: 0.2 },
   cyp: { geos: [() => cypressGeometry(13)], far: () => cypressGeometry(13, { far: true }), h: 8, sway: 0.2, shadow: 5.5, holes: 0.3 },
 };
 
 export function createTrees(level = 'high') {
-  const R = rng(5), spots = treeSpots().sort((a, b) => a.pri - b.pri);
+  const R = rng(5), spots = (MAP_ID === 'bishop' ? treeSpotsBishop() : treeSpots()).sort((a, b) => a.pri - b.pri);
   // prevailing NW wind: crowns sheared toward the south-east
   const lean = (135 - HEADING) * Math.PI / 180, dx = Math.sin(lean), dz = -Math.cos(lean), down = Math.atan2(-dz, dx);
   const g = new THREE.Group(), meshes = [], q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
@@ -570,7 +638,7 @@ export function createTrees(level = 'high') {
   const build = (lvl) => {
     for (const mesh of meshes) { g.remove(mesh); mesh.dispose(); }
     meshes.length = 0;
-    const need = new Set(), want = TREE_VARIANTS[lvl];
+    const need = new Set(), want = MAP_ID === 'bishop' ? BISHOP_VARIANTS[lvl] : TREE_VARIANTS[lvl];
     for (const [kind, k] of Object.entries(KINDS)) {
       const list = spots.filter((t) => t.kind === kind); if (!list.length) continue;
       const mat = mats[kind] || (mats[kind] = swayMaterial(new THREE.MeshLambertMaterial({ vertexColors: true, side: k.leaves ? THREE.DoubleSide : THREE.FrontSide }), k.sway, k.h, { rim: true, foliage: true, holes: k.holes, ragged: !k.leaves, flatNormal: k.leaves }));

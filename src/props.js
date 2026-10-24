@@ -1,7 +1,8 @@
 // Landmarks and course furniture: Morro Rock, the three stacks, flag + cup, tee markers, ball, gulls.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { ROCK, STACKS, CUP, TEE, heightAt, fbm } from './course.js';
+import { ROCK, STACKS, CUP, TEE, PAR, HOLE_YD, MAP_ID, heightAt, fbm } from './course.js';
+import { MAP } from './maps/index.js';
 
 export function createStacks() {
   // the three power-plant stacks and the turbine hall, merged into one vertex-coloured, flat-shaded mesh (one draw call)
@@ -68,8 +69,8 @@ export function createTeeMarkers() {
   const cv = document.createElement('canvas'); cv.width = 512; cv.height = 288; const x = cv.getContext('2d');
   x.fillStyle = '#28283F'; x.fillRect(0, 0, 512, 256); x.strokeStyle = '#B8E6E6'; x.lineWidth = 10; x.strokeRect(14, 14, 484, 228);
   x.fillStyle = '#B8E6E6'; x.font = '800 132px system-ui, sans-serif'; x.textBaseline = 'middle'; x.fillText('1', 44, 132);
-  x.fillStyle = '#ffffff'; x.font = '700 54px system-ui, sans-serif'; x.fillText('Morro Rock', 150, 100);
-  x.fillStyle = '#E1F5F3'; x.font = '500 40px system-ui, sans-serif'; x.fillText('Par 4 · 380 yd', 152, 170);
+  x.fillStyle = '#ffffff'; x.font = '700 54px system-ui, sans-serif'; x.fillText(MAP_ID === 'morro' ? 'Morro Rock' : MAP.name, 150, 100);
+  x.fillStyle = '#E1F5F3'; x.font = '500 40px system-ui, sans-serif'; x.fillText(MAP_ID === 'morro' ? 'Par 4 · 380 yd' : `Par ${PAR} · ${HOLE_YD} yd`, 152, 170);
   x.fillStyle = '#5a4030'; x.fillRect(0, 260, 512, 28);
   const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
   const wood = (geo) => { const uv = geo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, 0.5, 14 / 288); return geo; };

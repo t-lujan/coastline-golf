@@ -32,6 +32,10 @@
       <p class="eyebrow">Coastline Golf</p>
       <h1>Hole 1 · Morro Rock</h1>
       <p class="sub">Par 4 on the San Luis Obispo coast, played under live Morro Bay weather.</p>
+      <div id="map-picker" class="map-picker" role="group" aria-label="Choose a course">
+        <button type="button" class="map-choice" data-map="morro" aria-pressed="true"><b>Morro Rock</b><span>Par 4 · links</span></button>
+        <button type="button" class="map-choice" data-map="bishop" aria-pressed="false"><b>Bishop Peak</b><span>Par 5 · valley</span></button>
+      </div>
       <div class="load-track"><div id="load-bar"></div></div>
       <p id="load-step" class="load-step">Starting up</p>
       <button id="start" class="btn primary" disabled>Loading…</button>
@@ -70,6 +74,7 @@
 
     <div id="hint" hidden><span class="finger"></span>Pull back and release to swing<small>Drag sideways to aim · longer pull = more power</small></div>
     <div id="power" hidden><div class="power-track"><div id="power-fill"></div></div><span id="power-label"></span></div>
+    <div id="curve" hidden></div>
 
     <div class="bottom">
       <div class="stats chip">
@@ -116,8 +121,9 @@
       <h2 id="info-title">Coastline Golf</h2>
       <ul>
         <li><b>three.js</b>: custom GLSL water (wave slopes, fresnel, sun glints, shoreline foam), gradient sky with clouds, stars and moon, instanced wind-swayed dune grass and cypress, bloom, ACES tone mapping, SMAA/FXAA and adaptive quality.</li>
-        <li><b>Open-Meteo live weather</b> for Morro Bay: real wind pushes your ball, visibility thickens the marine layer, cloud cover greys the sky.</li>
-        <li><b>The real sun</b>: solar position for Morro Rock at the current California time sets the light, from morning fog to golden hour to moonlight.</li>
+        <li id="info-wx"><b>Open-Meteo live weather</b> for Morro Bay: real wind pushes your ball, visibility thickens the marine layer, cloud cover greys the sky.</li>
+        <li id="info-sun"><b>The real sun</b>: solar position for Morro Rock at the current California time sets the light, from morning fog to golden hour to moonlight.</li>
+        <li id="info-map" hidden><b>Real-world mapping</b></li>
         <li><b>Custom physics</b>: drag, backspin lift, wind drift, bounces, rolling friction per surface, sloped greens, lip-outs, water hazard drops.</li>
         <li><b>Synthesised audio</b>: surf, gulls, the strike and the cup rattle are all generated with WebAudio. No audio files.</li>
       </ul>

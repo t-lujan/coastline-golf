@@ -4,9 +4,9 @@ import * as THREE from 'three';
 import { GLSL_NOISE } from './noise.js';
 import { ROCK } from './course.js';
 
-export function createWater({ depthTex, bounds, segments }) {
+export function createWater({ depthTex, bounds, segments, size = 7000 }) {
   const uniforms = {
-    uTime: { value: 0 }, uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color(1, 1, 1) }, uSunI: { value: 1 },
+    uTime: { value: 0 }, uSurf: { value: 1 }, uCalm: { value: 1 }, uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color(1, 1, 1) }, uSunI: { value: 1 },
     uZen: { value: new THREE.Color() }, uHor: { value: new THREE.Color() },
     uDeep: { value: new THREE.Color('#042540') }, uMid: { value: new THREE.Color('#0a4f6e') }, uShallow: { value: new THREE.Color('#1aa9a6') }, uSandy: { value: new THREE.Color('#5fc4b0') },
     uDepth: { value: depthTex }, uBounds: { value: new THREE.Vector4(bounds.minX, bounds.minZ, bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) },
@@ -16,16 +16,16 @@ export function createWater({ depthTex, bounds, segments }) {
   const mat = new THREE.ShaderMaterial({
     uniforms,
     vertexShader: /* glsl */`
-      uniform float uTime; varying vec3 vW; varying float vDepthV;
+      uniform float uTime, uCalm; varying vec3 vW; varying float vDepthV;
       void main(){
         vec4 w = modelMatrix * vec4(position, 1.0);
-        float a = 0.12;
+        float a = 0.12 * uCalm;
         w.y += a*sin(w.x*0.045 + uTime*0.9) + a*0.7*sin(w.z*0.06 - uTime*1.1) + a*0.4*sin((w.x+w.z)*0.11 + uTime*1.7);
         vW = w.xyz; vec4 mv = viewMatrix * w; vDepthV = -mv.z;
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: /* glsl */`
-      uniform float uTime, uSunI, uFogDensity, uNight, uLow; uniform vec3 uSunDir, uSunCol, uZen, uHor, uDeep, uMid, uShallow, uSandy, uFogColor;
+      uniform float uTime, uSurf, uCalm, uSunI, uFogDensity, uNight, uLow; uniform vec3 uSunDir, uSunCol, uZen, uHor, uDeep, uMid, uShallow, uSandy, uFogColor;
       uniform sampler2D uDepth; uniform vec4 uBounds; uniform vec2 uWind; uniform vec4 uRock; uniform float uRockH; uniform vec3 uRockCol;
       varying vec3 vW; varying float vDepthV;
       ${GLSL_NOISE}
@@ -56,7 +56,7 @@ export function createWater({ depthTex, bounds, segments }) {
         float depth = mix(30.0, texture2D(uDepth, uv).r * 14.0, inside);
         float far = smoothstep(120.0, 1500.0, vDepthV);
         float detail = 1.0 - smoothstep(60.0, 500.0, vDepthV);
-        vec2 sl = waveSlope(vW.xz, uTime, detail) * mix(1.0, 0.3, far);
+        vec2 sl = waveSlope(vW.xz, uTime, detail) * mix(1.0, 0.3, far) * uCalm;
         // fine ripples close to the camera
         vec2 rp = vW.xz * 1.7 + uWind * uTime * 0.6;
         sl += (vec2(cgN2(rp), cgN2(rp + 17.0)) - 0.5) * 0.18 * detail;
@@ -99,7 +99,7 @@ export function createWater({ depthTex, bounds, segments }) {
         float band = smoothstep(0.0, 0.05, ph) * (1.0 - smoothstep(0.05, 0.42, ph)) * smoothstep(0.3, 0.6, fn + 0.25) * smoothstep(2.4, 0.25, depth);
         float lip = smoothstep(0.5, 0.04, depth + (fn - 0.5) * 0.3);
         float lace = smoothstep(0.45, 0.75, cgN2(vW.xz * 2.2 + uTime * 0.3)) * smoothstep(1.2, 0.2, depth);
-        float foam = clamp(max(max(band * 0.85, lip), lace * 0.45) * (0.55 + 0.65 * fn), 0.0, 1.0) * inside;
+        float foam = clamp(max(max(band * 0.85, lip), lace * 0.45) * (0.55 + 0.65 * fn), 0.0, 1.0) * inside * uSurf;
         vec3 foamC = vec3(0.92, 0.96, 0.97) * mix(1.0, 0.22, uNight) * (0.55 + 0.25 * uSunI / 3.0 + 0.25);
         col = mix(col, foamC, foam * 0.9);
         float f = 1.0 - exp(-pow(uFogDensity * vDepthV, 2.0));
@@ -109,7 +109,7 @@ export function createWater({ depthTex, bounds, segments }) {
         #include <colorspace_fragment>
       }`,
   });
-  const geo = new THREE.PlaneGeometry(7000, 7000, segments, segments); geo.rotateX(-Math.PI / 2);
+  const geo = new THREE.PlaneGeometry(size, size, segments, segments); geo.rotateX(-Math.PI / 2);
   const mesh = new THREE.Mesh(geo, mat); mesh.position.set(0, 0, -100); mesh.receiveShadow = false;
   return { mesh, uniforms };
 }

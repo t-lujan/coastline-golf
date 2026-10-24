@@ -1,6 +1,9 @@
-// Coastline Golf · Hole 1 · Morro Rock
+// Coastline Golf · Hole 1 · Morro Rock / Bishop Peak (the active map is chosen in maps/index.js)
 import * as THREE from 'three';
-import { TEE, CUP, GREEN, PAR, HOLE_M, HOLE_YD, ROCK, STACKS, BOUNDS, HEADING, heightAt, surfaceAt, greenDist } from './course.js';
+import { TEE, CUP, GREEN, PAR, HOLE_M, HOLE_YD, ROCK, STACKS, BOUNDS, HEADING, MAP_ID, WATER_LEVEL, BUNKERS, heightAt, surfaceAt, greenDist } from './course.js';
+import { MAP, MAPS, rememberMap } from './maps/index.js';
+import * as bishop from './maps/bishop.js';
+import { landColor, createBackdrop, createBishopKnobs, createCerroM, createMadonnaInn, createDryGrass, createChaparral, createGranite, createFarOaks } from './bishop-scene.js';
 import { sunPosition, sceneDate, laClock, lookFor } from './sun.js';
 import { getWeather, compass } from './weather.js';
 import { createSky } from './sky.js';
@@ -11,13 +14,16 @@ import { createRock } from './rock.js';
 import { windUniforms, leafUniforms, createGrass, createTrees, createShrubs, createFlowers, createIcePlant, createBeachRocks, createDriftwood, lodScatter } from './vegetation.js';
 import { createBoats, createWisps, createMist } from './atmos.js';
 import { rimUniforms, tameUniforms } from './noise.js';
-import { Ball, BALL_R, CLUBS, SURF, predict } from './physics.js';
+import { Ball, BALL_R, CLUBS, SURF, DT, predict } from './physics.js';
 import { Ribbon, groundLine, createMarker, Particles, puff, confetti } from './fx.js';
 import { QUALITY, createPost } from './post.js';
 import { Audio } from './audio.js';
 
 const params = new URLSearchParams(location.search);
 const TEST = params.has('test');
+const BISHOP = MAP_ID === 'bishop';
+// the landmark the hero shots frame: Morro Rock, or Bishop Peak's summit knobs
+const FOCUS = BISHOP ? bishop.LM.bishop : ROCK;
 const touch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 1;
 const $ = (id) => document.getElementById(id);
 const V3 = THREE.Vector3;
@@ -36,7 +42,7 @@ renderer.info.autoReset = false;   // count every pass of the frame, not just th
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(50, 1, 0.15, 6000);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.15, BISHOP ? 16000 : 6000);
 scene.fog = new THREE.FogExp2(0xcfe3ea, 0.001);
 const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.8);
 const sun = new THREE.DirectionalLight(0xffffff, 2.5);
@@ -76,42 +82,77 @@ async function loadStep(label, pct) {
   await new Promise((r) => setTimeout(r, 30));
 }
 
+// the pieces the Morro Rock bay has and Bishop Peak does not (boats, stack wisps, gulls, mist, beacons) are inert stand-ins there
+const inert = () => { const g = new THREE.Group(); g.userData.update = () => {}; return g; };
 async function build() {
-  const weatherP = getWeather(params);
-  await loadStep('Shaping the coastline', 0.1);
+  const weatherP = getWeather(params, MAP);
+  await loadStep('Shaping the ' + (BISHOP ? 'valley' : 'coastline'), 0.1);
   const big = !touch;
   // mesh detail follows the tier the game starts on (built once; a later tier change keeps these meshes)
   const L = QUALITY[qLevel], ts = qLevel === 'high' && touch ? [230, 238, 70, 205, 90, 75] : L.terrain;
-  const depthTex = bakeDepth(512);
-  const terrain = createTerrain({ segX: ts[0], segZ: ts[1], paintRes: big ? 1024 : 768, warp: true });
+  if (BISHOP) await bishop.loadHeights();
+  const depthTex = bakeDepth(512, !BISHOP);
+  const patches = BISHOP
+    ? { corridor: { minX: -50, maxX: 235, minZ: -125, maxZ: 330 }, green: { minX: GREEN.x - 32, maxX: GREEN.x + 32, minZ: GREEN.z - 28, maxZ: GREEN.z + 30 } }
+    : { corridor: { minX: -60, maxX: 80, minZ: -178, maxZ: 232 }, green: { minX: -28, maxX: 32, minZ: -165, maxZ: -115 } };
+  const style = BISHOP ? 'inland' : 'coast';
+  // Bishop's outer ground is mostly rough beyond the corridor patch (the real hills carry the detail): a lighter grid
+  const tk = BISHOP ? 0.76 : 1;
+  const baseColor = BISHOP ? landColor : null;
+  const terrain = createTerrain({ segX: Math.round(ts[0] * tk), segZ: Math.round(ts[1] * tk), paintRes: big ? 1024 : 768, warp: true, style, baseColor });
   scene.add(terrain.mesh);
-  const corridor = createTerrain({ segX: ts[2], segZ: ts[3], paint: terrain.paint, offset: 1, bounds: { minX: -60, maxX: 80, minZ: -178, maxZ: 232 } });
-  const greenPatch = createTerrain({ segX: ts[4], segZ: ts[5], paint: terrain.paint, offset: 2, bounds: { minX: -28, maxX: 32, minZ: -165, maxZ: -115 } });
+  const corridor = createTerrain({ segX: ts[2], segZ: ts[3], paint: terrain.paint, offset: 1, bounds: patches.corridor, style, baseColor });
+  const greenPatch = createTerrain({ segX: ts[4], segZ: ts[5], paint: terrain.paint, offset: 2, bounds: patches.green, style, baseColor });
   corridor.mesh.receiveShadow = greenPatch.mesh.receiveShadow = true;
   scene.add(corridor.mesh, greenPatch.mesh);
   W0.ground = [greenPatch.mesh, corridor.mesh, terrain.mesh];
-  W0.water = createWater({ depthTex, bounds: BOUNDS, segments: qLevel === 'high' && touch ? 110 : L.water }); scene.add(W0.water.mesh);
+  if (BISHOP) {
+    // a small murky pond instead of the bay: the same water shader, calmed, in valley colours
+    W0.water = createWater({ depthTex, bounds: BOUNDS, segments: L.water > 100 ? 40 : 20, size: 120 });
+    const P = bishop.POND; W0.water.mesh.position.set(P.x, WATER_LEVEL, P.z);
+    const u = W0.water.uniforms; u.uSurf.value = 0; u.uCalm.value = 0.28; u.uRock.value.set(1e5, 1e5, 1, 1); u.uRockH.value = 1;
+    u.uDeep.value.set('#1c3a2c'); u.uMid.value.set('#2d5a3c'); u.uShallow.value.set('#58804a'); u.uSandy.value.set('#8a9358');
+  } else W0.water = createWater({ depthTex, bounds: BOUNDS, segments: qLevel === 'high' && touch ? 110 : L.water });
+  scene.add(W0.water.mesh);
   W0.sky = createSky(); scene.add(W0.sky.mesh);
-  scene.add(createHills());
-  await loadStep('Raising Morro Rock', 0.35);
-  const rock = createRock(qLevel === 'high' && touch ? 'med' : L.rock); W0.crest = rock.userData.crest; W0.rock = rock.children[0]; scene.add(rock); scene.add(createStacks());
-  W0.boats = createBoats(); scene.add(W0.boats);
-  W0.wisps = createWisps(touch ? 45 : 70); scene.add(W0.wisps.points);
-  W0.mist = createMist(depthTex, BOUNDS); scene.add(W0.mist.group);
-  // aviation beacons on the stacks
-  const bmat = new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 0.3, 0.2), fog: false });
-  W0.beacons = new THREE.InstancedMesh(new THREE.SphereGeometry(1.4, 8, 6), bmat, STACKS.length * 2);
-  STACKS.forEach(([x, z], i) => { for (const [j, y, r] of [[0, 137.5, 1], [1, 72, 0.8]]) W0.beacons.setMatrixAt(i * 2 + j, new THREE.Matrix4().compose(new V3(x, heightAt(x, z) + y, z), new THREE.Quaternion(), new V3(r, r, r))); });
-  scene.add(W0.beacons); W0.bmat = bmat;
+  if (BISHOP) {
+    W0.backdrop = createBackdrop(qLevel === 'high' && !touch ? 'high' : qLevel === 'low' ? 'low' : 'med'); scene.add(W0.backdrop);
+    scene.add(createFarOaks(qLevel === 'high' ? (touch ? 2400 : 5000) : qLevel === 'med' ? 1700 : 1000, W0.backdrop.userData.surfaceY, qLevel === 'low' ? 0 : qLevel === 'high' && !touch ? 600 : 260));
+  } else scene.add(createHills());
+  await loadStep(BISHOP ? 'Raising Bishop Peak' : 'Raising Morro Rock', 0.35);
+  if (BISHOP) {
+    const knobs = createBishopKnobs(qLevel === 'high' && !touch ? 2 : 1); W0.crest = knobs.userData.crest; W0.rock = knobs; scene.add(knobs);
+    const sy = W0.backdrop.userData.surfaceY;
+    W0.cerroM = createCerroM(sy); scene.add(W0.cerroM); W0.inn = createMadonnaInn(sy); scene.add(W0.inn);
+    W0.boats = inert(); W0.mist = { group: new THREE.Group(), uniforms: { uCol: { value: new THREE.Color() }, uAmt: { value: 0 }, uTime: { value: 0 } } };
+    W0.wisps = { points: new THREE.Group(), uniforms: { uCol: { value: new THREE.Color() }, uWind: { value: new THREE.Vector2() }, uTime: { value: 0 }, uScale: { value: 0 } } };
+    W0.bmat = { color: new THREE.Color() };
+  } else {
+    const rock = createRock(qLevel === 'high' && touch ? 'med' : L.rock); W0.crest = rock.userData.crest; W0.rock = rock.children[0]; scene.add(rock); scene.add(createStacks());
+    W0.boats = createBoats(); scene.add(W0.boats);
+    W0.wisps = createWisps(touch ? 45 : 70); scene.add(W0.wisps.points);
+    W0.mist = createMist(depthTex, BOUNDS); scene.add(W0.mist.group);
+    // aviation beacons on the stacks
+    const bmat = new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 0.3, 0.2), fog: false });
+    W0.beacons = new THREE.InstancedMesh(new THREE.SphereGeometry(1.4, 8, 6), bmat, STACKS.length * 2);
+    STACKS.forEach(([x, z], i) => { for (const [j, y, r] of [[0, 137.5, 1], [1, 72, 0.8]]) W0.beacons.setMatrixAt(i * 2 + j, new THREE.Matrix4().compose(new V3(x, heightAt(x, z) + y, z), new THREE.Quaternion(), new V3(r, r, r))); });
+    scene.add(W0.beacons); W0.bmat = bmat;
+  }
   W0.flag = createFlag(); scene.add(W0.flag.group);
   scene.add(createTeeMarkers());
   W0.peg = createTeePeg(); scene.add(W0.peg);
-  W0.gulls = createGulls(touch ? 7 : 11); scene.add(W0.gulls);
-  await loadStep('Planting cypress and dune grass', 0.55);
+  if (BISHOP) W0.gulls = inert(); else { W0.gulls = createGulls(touch ? 7 : 11); }
+  scene.add(W0.gulls);
+  await loadStep(BISHOP ? 'Planting oaks and golden grass' : 'Planting cypress and dune grass', 0.55);
   // scatter is thinned by distance from the camera every few metres it moves (see updateLod); reach: how far each kind
   // carries relative to the tier's near/far distances (bigger plants stay visible further out)
-  W0.scatter = { grass: createGrass(touch ? 9000 : 20000, touch ? 650 : 1000), flowers: createFlowers(touch ? 2600 : 5000), ice: createIcePlant(touch ? 1400 : 2600), rocks: createBeachRocks(touch ? 260 : 420), drift: createDriftwood(40), shrubs: createShrubs(touch ? 700 : 1100) };
-  W0.reach = { grass: 1, flowers: 0.8, ice: 1.4, rocks: 1.6, drift: 1.6, shrubs: 1.7 };
+  if (BISHOP) {
+    W0.scatter = { grass: createDryGrass(touch ? 9000 : 20000, touch ? 650 : 1000), rocks: createGranite(touch ? 240 : 420), shrubs: createChaparral(touch ? 700 : 1100) };
+    W0.reach = { grass: 1, rocks: 1.8, shrubs: 1.8 };
+  } else {
+    W0.scatter = { grass: createGrass(touch ? 9000 : 20000, touch ? 650 : 1000), flowers: createFlowers(touch ? 2600 : 5000), ice: createIcePlant(touch ? 1400 : 2600), rocks: createBeachRocks(touch ? 260 : 420), drift: createDriftwood(40), shrubs: createShrubs(touch ? 700 : 1100) };
+    W0.reach = { grass: 1, flowers: 0.8, ice: 1.4, rocks: 1.6, drift: 1.6, shrubs: 1.7 };
+  }
   for (const m of Object.values(W0.scatter)) { lodScatter(m); scene.add(m); }
   W0.trees = createTrees(qLevel); scene.add(W0.trees);
   // ball, effects
@@ -120,7 +161,7 @@ async function build() {
   W0.aimLine = new Ribbon(200, 0xe1f5f3, 0.7, 0.0022, 0.03); scene.add(W0.aimLine.mesh);
   W0.marker = createMarker(); scene.add(W0.marker);
   W0.parts = new Particles(900); scene.add(W0.parts.points);
-  await loadStep('Reading Morro Bay weather', 0.75);
+  await loadStep(`Reading ${MAP.place} weather`, 0.75);
   weather = await weatherP;
   if (weather.rain) {
     const n = touch ? 900 : 1800, pos = new Float32Array(n * 6);
@@ -134,38 +175,59 @@ async function build() {
   applyLook();
   resize();
   setQuality(qLevel, false);
-  camera.position.set(-260, 60, -470); camera.lookAt(ROCK.x, 60, ROCK.z);
+  if (BISHOP) camera.position.set(-120, 60, 120); else camera.position.set(-260, 60, -470);
+  camera.lookAt(FOCUS.x, 60, FOCUS.z);
   renderer.compile(scene, camera);
   post.render();
   await loadStep('Ready', 1);
 }
 // par and yardage come from the course itself (centre-line length, tee -> dogleg corner -> cup)
-$('hole-text').textContent = `Hole 1 · Morro Rock · Par ${PAR} · ${HOLE_YD} yd`;
-$('fly-sub').textContent = `Par ${PAR} · ${HOLE_YD} yd · carry the inlet`;
+$('hole-text').textContent = `Hole 1 · ${MAP.name} · Par ${PAR} · ${HOLE_YD} yd`;
+$('fly-sub').textContent = `Par ${PAR} · ${HOLE_YD} yd · ${MAP.cap}`;
+if (BISHOP) {
+  document.title = 'Coastline Golf · Bishop Peak'; $('scene').setAttribute('aria-label', '3D golf hole below Bishop Peak, San Luis Obispo');
+  document.querySelector('#flytitle h2').textContent = MAP.name; document.querySelector('#loader h1').textContent = `Hole 1 · ${MAP.name}`;
+  document.querySelector('#loader .sub').textContent = MAP.loaderSub; document.querySelector('#endcard .eyebrow').textContent = `Hole 1 · ${MAP.name}`;
+  document.getElementById('info-wx').innerHTML = '<b>Open-Meteo live weather</b> for San Luis Obispo: real wind pushes your ball, visibility thickens the valley haze, cloud cover greys the sky.';
+  document.getElementById('info-sun').innerHTML = '<b>The real sun</b>: solar position over San Luis Obispo at the current California time sets the light, from morning haze to golden hour to moonlight.';
+  document.getElementById('info-map').hidden = false; document.getElementById('info-map').innerHTML = '<b>Real-world mapping</b>: Bishop Peak, Cerro San Luis Obispo (and its "M"), the Madonna Inn and the Nine Sisters stand at their true bearings and distances, on real elevation data (Mapzen Terrain Tiles / AWS Open Data, including USGS 3DEP and SRTM).';
+}
 
 // ---------- light, sky, fog from real time + weather ----------
-const sunDir = new V3(), moonDir = new V3(), tmpC = new THREE.Color();
+const sunDir = new V3(), moonDir = new V3(), tmpC = new THREE.Color(), tmpC2 = new THREE.Color();
 function applyLook() {
   if (!timeOverride) simDate = new Date();
-  const sp = sunPosition(simDate), el = sp.elevation * Math.PI / 180, az = (sp.azimuth - HEADING) * Math.PI / 180;
+  const sp = sunPosition(simDate, MAP.lat, MAP.lon), el = sp.elevation * Math.PI / 180, az = (sp.azimuth - HEADING) * Math.PI / 180;
   sunDir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)).normalize();
   const mel = 0.3, maz = -0.4;   // art-directed: the moon hangs front-left of the rock from the tee, so its path lies on the water
   moonDir.set(Math.sin(maz) * Math.cos(mel), Math.sin(mel), -Math.cos(maz) * Math.cos(mel)).normalize();
   look = lookFor(sp.elevation, weather);
   const night = THREE.MathUtils.smoothstep(-sp.elevation, 2, 9); // 0 day → 1 night
   look.nightK = night; look.elev = sp.elevation;
+  if (BISHOP && night < 0.5) {
+    // inland valley: a natural Central Coast sky, a clean blue overhead and a pale, dusty haze low over the hills instead of
+    // the coast's purple band; the weather's grey still comes through (cloud and fog are already mixed into look)
+    const keep = Math.min(0.9, look.cloud * 0.5 + look.fog * 0.8), low = 1 - THREE.MathUtils.smoothstep(sp.elevation, 4, 25);
+    look.zen.lerp(tmpC.set('#5f93cc'), 0.7 * (1 - keep)); look.hor.lerp(tmpC.set('#e3e2d6').lerp(tmpC2.set('#efdcb6'), low * 0.6), 0.65 * (1 - keep));
+  }
   hemi.color.copy(look.hemiS); hemi.groundColor.copy(look.hemiG); hemi.intensity = look.hemiI * 0.78 * (1 + night * 0.15) * (1 + Math.max(0, Math.min(1, 1 - sp.elevation / 12)) * 0.7 * (1 - night));
   if (night > 0.5) { sun.color.set(0xa4bcff); sun.intensity = 2.1 * (1 - weather.cloud / 170); W0.lightDir = moonDir; }
   else { sun.color.copy(look.sun); sun.intensity = Math.max(0.05, look.sunI * 0.8); W0.lightDir = sunDir; }
+  if (BISHOP && night < 0.5) {
+    // the inland valley at a low sun: keep the warmth but not the coast's deep orange, so dry grass reads golden-tan, not rust
+    const low0 = 1 - THREE.MathUtils.smoothstep(sp.elevation, 3, 24);
+    sun.color.lerp(tmpC.set('#ffe9d0'), 0.7 * low0); hemi.groundColor.lerp(tmpC.set('#66645a'), 0.6 * low0); hemi.color.lerp(tmpC.set('#b8cce4'), 0.45 * low0);
+    W0.bishopLow = low0;
+  }
   const fogC = look.hor.clone();
   scene.fog.color.copy(fogC);
   // a marine layer: thick enough that the Rock looms as a soft shape at ~550 m, thin enough that the green (~345 m from
   // the tee) still reads as green under the flag
   const base = Math.min(0.0018, Math.max(0.00042, 1.4 / Math.max(300, weather.visibility)));
-  scene.fog.density = THREE.MathUtils.lerp(base, 0.00185, weather.fogFactor * 0.85);
+  scene.fog.density = THREE.MathUtils.lerp(base * MAP.fogScale, 0.00185, weather.fogFactor * 0.85);
   renderer.toneMappingExposure = look.exp * (1 + night * 0.2);
   // grade: moonlight is desaturated with lifted blue shadows; bloom only catches the moon, lights and glints at night
-  gradeState.sat = 1.12 - night * 0.36; gradeState.lift.set(0.004, 0.011, 0.03).multiplyScalar(night);
+  gradeState.sat = (BISHOP ? 1.04 : 1.12) - night * 0.36; gradeState.lift.set(0.004, 0.011, 0.03).multiplyScalar(night);
   // fill: opposite the key, warm at golden hour so the foreground reads gold rather than dark
   const low = night > 0.5 ? 0 : 1 - THREE.MathUtils.smoothstep(sp.elevation, 2, 22);
   // a low sun sits in or near the frame: less, tighter bloom so the trees and inlet beside it stay readable
@@ -174,14 +236,17 @@ function applyLook() {
   fill.position.set(-sunDir.x, 0.6, -sunDir.z).normalize().multiplyScalar(100); fill.target.position.set(0, 0, 0);
   if (night > 0.5) { fill.color.set(0x7c94cc); fill.intensity = 0.55; }
   else { fill.color.copy(look.hor).lerp(new THREE.Color(0xffc08a), low * 0.6); fill.intensity = 0.25 + low * 0.75; }
+  if (BISHOP && night < 0.5) { fill.color.lerp(tmpC.set('#d4dae0'), 0.6); fill.intensity = 0.25 + low * 0.35; }
   W0.mist.uniforms.uCol.value.copy(look.hor).lerp(new THREE.Color(1, 1, 1), 0.35);
   const morning = night < 0.5 && sp.azimuth < 180 && sp.elevation < 22 ? 1 : 0;
   W0.mist.uniforms.uAmt.value = Math.max(weather.fogFactor * 0.85, morning * 0.55);
-  W0.mist.group.visible = W0.mist.uniforms.uAmt.value > 0.02;
+  W0.mist.group.visible = !BISHOP && W0.mist.uniforms.uAmt.value > 0.02;
   W0.wisps.uniforms.uCol.value.copy(look.hor).lerp(new THREE.Color(1, 1, 1), 0.5).multiplyScalar(night > 0.5 ? 0.35 : 1);
   const s = W0.sky.uniforms;
   s.uZen.value.copy(look.zen); s.uHor.value.copy(look.hor); s.uSunCol.value.copy(look.sun); s.uSunDir.value.copy(sunDir); s.uMoonDir.value.copy(moonDir);
   s.uNight.value = night; s.uCloud.value = look.cloud; s.uFog.value = look.fog;
+  // the inland sky: blue reaches lower and the low sun warms the horizon, not the whole sun-side dome (no purple wash)
+  if (BISHOP) { s.uWarm.value = 0.3; s.uHorPow.value = 6.0; }
   const w = W0.water.uniforms;
   w.uSunDir.value.copy(night > 0.5 ? moonDir : sunDir); w.uSunCol.value.copy(night > 0.5 ? new THREE.Color(0x9fb4ff) : look.sun);
   w.uSunI.value = night > 0.5 ? 0.75 * (1 - weather.cloud / 140) : look.sunI; w.uZen.value.copy(look.zen); w.uHor.value.copy(look.hor);
@@ -197,7 +262,7 @@ function applyLook() {
   W0.gulls.visible = night < 0.5 && weather.fogFactor < 0.8;
   W0.ballMesh.material.emissive.set(night > 0.5 ? 0x9fe8e8 : 0x334044); W0.ballMesh.material.emissiveIntensity = night > 0.5 ? 1.4 : 0.25;
   // warm low sun: pull the rock and foliage back toward natural colours; distant trees fade into the haze
-  tameUniforms.uTame.value = low * (1 - night); tameUniforms.uNightK.value = night; tameUniforms.uRelief.value = 1 - low * 0.45 - (night > 0.5 ? 0.4 : 0); tameUniforms.uAerial.value = night > 0.5 ? 0.12 : 0.22 + weather.fogFactor * 0.2;
+  tameUniforms.uTame.value = low * (1 - night); tameUniforms.uNightK.value = night; tameUniforms.uRelief.value = 1 - low * 0.45 - (night > 0.5 ? 0.4 : 0); tameUniforms.uAerial.value = night > 0.5 ? 0.12 : (BISHOP ? 0.07 : 0.22) + weather.fogFactor * 0.2;   // Bishop's pale valley haze would bleach the oaks
   // light scattered through the canopy: warm at golden hour, cool and faint by moonlight
   leafUniforms.uLeafGlow.value.copy(sun.color).multiplyScalar(Math.min(2.5, sun.intensity) * (night > 0.5 ? 0.06 : 0.1 + low * 0.16));
   applyGrade();
@@ -205,7 +270,7 @@ function applyLook() {
   const clock = laClock(simDate);
   let phase = look.elev < -6 ? 'Moonlit night' : look.elev < 0 ? 'Twilight' : look.elev < 9 ? (sp.azimuth > 180 ? 'Golden hour' : 'Sunrise') : weather.fogFactor > 0.4 ? 'Marine layer' : sp.azimuth < 180 && look.elev < 30 ? 'Morning' : 'Daylight';
   if (weather.rain) phase = look.elev < -6 ? 'Rainy night' : 'Light rain';
-  $('wx-text').textContent = `Morro Bay · ${weather.label.replace(/ \w+$/, '')} ${compass(weather.windFrom)} · ${Math.round(weather.tempF)}°F`;
+  $('wx-text').textContent = `${MAP.place} · ${weather.label.replace(/ \w+$/, '')} ${compass(weather.windFrom)} · ${Math.round(weather.tempF)}°F`;
   $('wx-live').textContent = weather.live ? 'Live' : 'Typical';
   $('wx-live').classList.toggle('off', !weather.live);
   $('time-text').textContent = `${phase} · ${clock} PT${timeOverride ? ' (preview)' : ''}`;
@@ -249,11 +314,13 @@ window.addEventListener('resize', resize);
 
 // ---------- game state ----------
 const ball = new Ball();
-const G = { state: 'loading', strokes: 0, club: 'driver', manualClub: false, yaw: 0, putts: 0, longest: 0, penalties: 0, t: 0, timeScale: 1, hinted: false };
+const G = { state: 'loading', strokes: 0, club: 'driver', manualClub: false, yaw: 0, putts: 0, longest: 0, penalties: 0, t: 0, timeScale: 1, hinted: false, curve: 0 };
 const cam = { pos: new V3(), look: new V3(), from: null, to: null, tt: 0, dur: 1, dir: new THREE.Vector2(0, -1) };
 const cupPos = () => new V3(CUP.x, heightAt(CUP.x, CUP.z), CUP.z);
 const distToCup = () => Math.hypot(ball.p.x - CUP.x, ball.p.z - CUP.z);
 const yawTo = (x, z) => Math.atan2(x - ball.p.x, -(z - ball.p.z));
+// where a fresh shot is aimed: at the cup, except on a dogleg where the cup is out of sight round the corner
+const aimYaw = () => (BISHOP && distToCup() > bishop.AIM_VIA.until && ball.p.z > bishop.AIM_VIA.z + 40 ? yawTo(bishop.AIM_VIA.x, bishop.AIM_VIA.z) : yawTo(CUP.x, CUP.z));
 
 function autoClub() {
   if (ball.lie === 'green') return 'putter';
@@ -275,14 +342,16 @@ function aimPose(club = G.club, yaw = G.yaw) {
   const cx = p.x - dx * back, cz = p.z - dz * back;
   const pos = new V3(cx, Math.max(p.y, heightAt(cx, cz) + 0.6, 0.6) + h + (onTee ? 1.2 : 0), cz);
   const ahead = putt ? Math.max(2.5, Math.min(7, distToCup())) : Math.min(130, Math.max(60, distToCup() * 0.6));
-  const lx = p.x + dx * ahead, lz = p.z + dz * ahead;
+  // on Bishop Peak the tee view is turned a little toward the Madonna Inn and the M so they sit in frame, not at the edge
+  const bias = BISHOP && onTee ? 0.26 * ahead : 0;
+  const lx = p.x + dx * ahead + dz * bias, lz = p.z + dz * ahead - dx * bias;
   const lk = new V3(lx, putt ? heightAt(lx, lz) : Math.max(onTee ? 0 : p.y, heightAt(lx, lz)) + 2.2 + ahead * 0.012, lz);
   return { pos, look: lk };
 }
 function tweenTo(pose, dur) { cam.from = { pos: camera.position.clone(), look: cam.look.clone() }; cam.to = pose; cam.tt = 0; cam.dur = dur; }
 
 function prepareShot(dur = 1.6) {
-  G.yaw = yawTo(CUP.x, CUP.z);
+  G.yaw = aimYaw();
   if (!G.manualClub) setClub(autoClub());
   G.manualClub = false;
   tweenTo(aimPose(), dur);
@@ -311,7 +380,7 @@ function shoot(club, power, yaw) {
   G.strokes++; if (club === 'putter') G.putts++;
   G.shotStart = { ...ball.p }; G.shotFromTee = ball.lie === 'tee'; G.cupCheck = false; G.slowmo = false; G.waterHandled = false;
   ball.lipped = false;
-  ball.strike(club, power, yaw, weather.wind);
+  ball.strike(club, power, yaw, weather.wind, club === 'putter' ? 0 : G.curve); G.curve = 0; updateCurveHud();
   audio.thwack(club, power);
   if (club !== 'putter') { const sandy = ball.lie === 'sand' || ball.lie === 'waste'; puff(W0.parts, ball.p, sandy ? 'sand' : 'grass', ball.lie === 'sand' ? 1.2 : sandy ? 0.8 : 0.5); }
   W0.tracer.clear(); W0.tracer.push(ball.p);
@@ -385,11 +454,11 @@ function showEnd() {
 
 function shareText() {
   const rel = G.strokes - PAR, s = rel === 0 ? 'even par' : relText(rel);
-  return `I shot ${s} at Morro Rock on Tyler's course ⛳`;
+  return `I shot ${s} at ${MAP.name} on Tyler's course ⛳`;
 }
 async function share() {
   const url = location.href.split('?')[0], text = shareText();
-  if (navigator.share) { try { await navigator.share({ title: 'Coastline Golf · Morro Rock', text, url }); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
+  if (navigator.share) { try { await navigator.share({ title: `Coastline Golf · ${MAP.name}`, text, url }); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
   const full = `${text} ${url}`;
   try { await navigator.clipboard.writeText(full); toast('Copied to clipboard'); }
   catch { const ta = document.createElement('textarea'); ta.value = full; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('Copied to clipboard'); } catch { toast(full, 4000); } ta.remove(); }
@@ -426,9 +495,25 @@ function keyPath(keys) {
   };
 }
 function buildFlyover() {
-  G.yaw = yawTo(CUP.x, CUP.z);
+  G.yaw = aimYaw();
   const end = aimPose('driver', G.yaw), e = end.pos, l = end.look;
   const c = cupPos(), R = ROCK, k = 0.9;   // k: overall pace (seconds per key-time unit)
+  if (BISHOP) {
+    // from above the corner, out toward Bishop Peak, then past the green on its tee side and back down to the tee
+    // camera: the heading turns one way only (from the mountain round to the first fairway) and the view never tips up
+    const G0 = GREEN, f = (t, x, y, z, lx, ly, lz) => [t * k, x, y, z, lx, ly, lz];
+    const keys = [
+      f(0.0, -60, 88, 58, G0.x + 520, 80, G0.z - 100),
+      f(2.7, 30, 62, 24, G0.x + 260, 46, G0.z - 58),
+      f(5.0, 118, 40, 22, G0.x + 30, 20, G0.z - 22),
+      f(6.9, 176, 27, 42, c.x + 12, c.y, c.z - 8),
+      f(8.8, 130, 34, 122, 134, heightAt(134, 22) + 1, 22),
+      f(10.4, 70, 30, 212, 70, heightAt(70, 70) + 1, 70),
+      f(12.6, e.x, e.y, e.z, l.x, l.y, l.z),
+    ];
+    fly.path = keyPath(keys); fly.dur = keys[keys.length - 1][0];
+    return;
+  }
   // the heading only ever turns one way (from the Rock round to the fairway), the view tips down once onto the green
   // and levels out once at the tee, and the camera slows to ~25 m/s while it arcs round the flag 50 m out, 10 m+ above the dunes
   const keys = [
@@ -451,7 +536,7 @@ function endFlyover(quick) {
   fly.endT = performance.now();
   perf.frames = 0; perf.t0 = fly.endT;   // auto quality starts judging the frame rate only now (see trackPerf)
   $('flytitle').hidden = true;
-  G.yaw = yawTo(CUP.x, CUP.z); setClub(autoClub());
+  G.yaw = aimYaw(); setClub(autoClub());
   tweenTo(aimPose(), quick ? 0.9 : 1.4);
   G.state = 'aim'; $('hud').hidden = false;
   if (!G.hinted) $('hint').hidden = false;
@@ -492,6 +577,7 @@ const endDrag = (fire) => (e) => {
 canvas.addEventListener('pointerup', endDrag(true));
 canvas.addEventListener('pointercancel', endDrag(false));
 let aimCache = 0;
+function updateCurveHud() { const el = $('curve'); if (!el) return; el.hidden = !G.curve; el.textContent = G.curve < 0 ? `draw ${Math.abs(G.curve) * 100}%` : `fade ${G.curve * 100}%`; }
 function updateAim() {
   const s = dragShot();
   const pull = $('pull');
@@ -502,15 +588,22 @@ function updateAim() {
   $('power').hidden = false; $('power-fill').style.transform = `scaleX(${s.power})`;
   let len, land;
   if (G.club === 'putter') {
-    const v = CLUBS.putter.vmax * Math.pow(s.power, 1.6); len = Math.min(40, v * v / (2 * SURF.green.roll));
+    const now = performance.now();
+    if (now - aimCache > 40 || !G.lastPred) { aimCache = now; G.lastPred = predict(ball.p, ball.lie, 'putter', s.power, s.yaw, { x: 0, z: 0 }, 0, []); }
+    len = Math.min(40, Math.hypot(G.lastPred.end.x - ball.p.x, G.lastPred.end.z - ball.p.z));   // where it would stop, slope and all
     $('power-label').textContent = `${Math.round(s.power * 100)}% · ~${Math.round(len * 3.28)} ft`;
-    const dx2 = Math.sin(s.yaw), dz2 = -Math.cos(s.yaw); land = { x: ball.p.x + dx2 * len, z: ball.p.z + dz2 * len };
+    // the preview follows the predicted roll, so the break on a sloping green bends the line
+    const e = G.lastPred.state === 'holed' ? CUP : G.lastPred.end; land = { x: e.x, z: e.z };
+    const path = G.lastPred.path.filter((p, i, a) => i % Math.max(1, Math.ceil(a.length / 190)) === 0 || i === a.length - 1);
+    W0.aimLine.set(path.map((p) => ({ x: p.x, y: Math.max(0.05, heightAt(p.x, p.z)) + 0.12, z: p.z })));
+    W0.marker.visible = true; W0.marker.position.set(land.x, Math.max(0.05, heightAt(land.x, land.z)) + 0.08, land.z);
+    return;
   } else {
     const now = performance.now();
-    if (now - aimCache > 40 || !G.lastPred) { aimCache = now; G.lastPred = predict(ball.p, ball.lie, G.club, s.power, s.yaw, { x: 0, z: 0 }); }
+    if (now - aimCache > 40 || !G.lastPred) { aimCache = now; G.lastPred = predict(ball.p, ball.lie, G.club, s.power, s.yaw, { x: 0, z: 0 }, G.curve); }
     const cp = G.lastPred.carryPt || G.lastPred.end; len = Math.hypot(cp.x - ball.p.x, cp.z - ball.p.z);
-    land = { x: ball.p.x + Math.sin(s.yaw) * len, z: ball.p.z - Math.cos(s.yaw) * len };
-    $('power-label').textContent = `${CLUBS[G.club].name} · ${Math.round(s.power * 100)}% · carry ${yd(len)} yd`;
+    land = { x: cp.x, z: cp.z };   // where it lands, draw / fade included
+    $('power-label').textContent = `${CLUBS[G.club].name} · ${Math.round(s.power * 100)}% · carry ${yd(len)} yd${G.curve ? (G.curve < 0 ? ' · draw' : ' · fade') : ''}`;
   }
   W0.aimLine.set(groundLine(ball.p, s.yaw, len, G.club === 'putter' ? 0.25 : Math.max(0.5, len / 150)));
   W0.marker.visible = true; W0.marker.position.set(land.x, Math.max(0.05, heightAt(land.x, land.z)) + 0.08, land.z);
@@ -519,10 +612,23 @@ for (const b of document.querySelectorAll('#clubs button')) b.addEventListener('
 window.addEventListener('keydown', (e) => {
   if (G.state === 'aim' && !cam.to) {
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { G.yaw += (e.key === 'ArrowLeft' ? -1 : 1) * (G.club === 'putter' ? 0.01 : 0.02); tweenTo(aimPose(), 0.12); }
+    if ((e.key === ',' || e.key === '.') && G.club !== 'putter') { G.curve = Math.max(-1, Math.min(1, Math.round((G.curve + (e.key === ',' ? -0.5 : 0.5)) * 2) / 2)); G.lastPred = null; updateCurveHud(); if (drag.on) updateAim(); }
     const k = { 1: 'driver', 2: 'iron', 3: 'wedge', 4: 'putter' }[e.key]; if (k) { setClub(k, true); tweenTo(aimPose(), 0.6); }
   }
   if (e.key === 'Escape') { $('info').hidden = true; }
 });
+
+// map picker on the start screen: the course data is bound when the page loads, so a different pick saves the choice
+// and reloads with ?map=
+for (const b of document.querySelectorAll('#map-picker .map-choice')) {
+  b.setAttribute('aria-pressed', String(b.dataset.map === MAP_ID));
+  b.addEventListener('click', () => {
+    rememberMap(b.dataset.map);
+    if (b.dataset.map === MAP_ID) return;
+    const u = new URL(location.href); u.searchParams.set('map', b.dataset.map); location.replace(u.toString());
+  });
+}
+if (BISHOP) document.querySelector('.load-art').innerHTML = '<defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E8D9A8"/><stop offset="1" stop-color="#8A7A3E"/></linearGradient></defs><circle class="load-sun" cx="188" cy="40" r="13" fill="#FFF3D6"/><path d="M8 96 L44 70 L58 52 L66 58 L82 30 L92 38 L104 22 L114 36 L124 34 L150 68 L182 84 L236 92 Z" fill="#E1F5F3" opacity=".95"/><path d="M130 96 L168 62 L176 66 L214 90 L236 92 L236 96 Z" fill="#E1F5F3" opacity=".5"/><g class="load-waves" stroke="url(#lg)" stroke-width="3" fill="none" stroke-linecap="round"><path d="M4 106 q 10 -4 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0"/></g>';
 
 // UI buttons
 const syncSound = () => { $('btn-sound').setAttribute('aria-pressed', String(!audio.muted)); $('btn-sound').setAttribute('aria-label', audio.muted ? 'Sound off' : 'Sound on'); $('snd-on').style.display = audio.muted ? 'none' : ''; $('snd-off').style.display = audio.muted ? '' : 'none'; };
@@ -617,7 +723,7 @@ function update(rdt) {
   // physics
   if (G.state === 'flight' || G.state === 'holed' && ball.state !== 'holed') {
     const n = Math.ceil(dt / (1 / 240));
-    for (let i = 0; i < n; i++) ball.step(dt / n);
+    for (let i = 0; i < n; i++) ball.step(dt / n);   // Ball re-slices into fixed 1/240 s substeps
     if (ball.state === 'flight') W0.tracer.push(ball.p);
     handleEvents();
   }
@@ -626,8 +732,8 @@ function update(rdt) {
     // cup-drop slow motion: peek ahead once the ball is rolling close to the hole
     if (ball.state === 'roll' && !G.cupCheck && distToCup() < 3.2) {
       G.cupCheck = true;
-      const b = new Ball(); b.p = { ...ball.p }; b.v = { ...ball.v }; b.state = 'roll'; b.club = ball.club; b.wind = ball.wind; b.t = ball.t; b.rollT = ball.rollT; b.bounces = ball.bounces; b.lipped = true;
-      for (let i = 0; i < 960 && b.state === 'roll'; i++) b.step(1 / 240);
+      const b = ball.clone();      // deterministic physics: the copy does exactly what the real ball will
+      for (let i = 0; i < 960 && b.state === 'roll'; i++) b.step(DT);
       if (b.state === 'holed') { G.slowmo = true; G.timeScale = 0.38; }
     }
     if (ball.state === 'rest') {
@@ -795,7 +901,7 @@ const SUMMIT = new V3(), rockSpan = { mid: 0 };
 // the point of the Rock's outline that stands highest in view from p (the near shoulder of the dome, not the true summit),
 // and the azimuth of the middle of its upper flanks so the whole massif can be centred
 function rockTop(p) {
-  let best = -1, lo = 9, hi = -9; const a0 = Math.atan2(ROCK.x - p.x, -(ROCK.z - p.z));
+  let best = -1, lo = 9, hi = -9; const a0 = Math.atan2(FOCUS.x - p.x, -(FOCUS.z - p.z));
   for (const q of W0.crest) {
     const e = (q.y - p.y) / Math.hypot(q.x - p.x, q.z - p.z); if (e > best) { best = e; SUMMIT.copy(q); }
     const a = Math.atan2(q.x - p.x, -(q.z - p.z)) - a0; if (a < lo) lo = a; if (a > hi) hi = a;
@@ -860,24 +966,57 @@ if (TEST) {
     get fps() { return perf.fps; }, get fpsHistory() { return perf.history.slice(); }, get frameMs() { return { update: +perf.upd.toFixed(2), render: +perf.ren.toFixed(2) }; }, info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }), get quality() { return qLevel; }, get tierChanges() { return tierChanges; }, autoStart, get weather() { return weather; }, errors,
     get yaw() { return G.yaw; }, get club() { return G.club; }, W0, camera, renderer, scene,
     hole: { par: PAR, yd: HOLE_YD, m: HOLE_M },
+    map: { id: MAP_ID, name: MAP.name, lat: MAP.lat, lon: MAP.lon, weatherLat: MAP.weatherLat, weatherLon: MAP.weatherLon, heading: HEADING },
+    // real-world mapping of the Bishop Peak hole: tee / corner / cup as lat-lon, and the landmarks' lat-lon with their world positions
+    geo: BISHOP ? { tee: bishop.worldToLl(TEE.x, TEE.z), corner: bishop.worldToLl(bishop.CORNER.x, bishop.CORNER.z), cup: bishop.worldToLl(CUP.x, CUP.z), site: bishop.SITE, landmarks: bishop.LM } : null,
+    TEE, CUP, bunkers: BUNKERS, pond: BISHOP ? bishop.POND : null, aimVia: BISHOP ? bishop.AIM_VIA : null, heightAt,
+    // Bishop Peak scene facts for the tests: the M draped on the hillside, the real-elevation heightmaps, the Inn's placement
+    bishopCheck: () => {
+      if (!BISHOP) return null;
+      const M = W0.cerroM, P = M.geometry.attributes.position, sy = W0.backdrop.userData.surfaceY, lift = M.userData.lift;
+      let drape = 0, real = 0, lo = 1e9, hi = -1e9;
+      for (let i = 0; i < P.count; i++) {
+        const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
+        drape = Math.max(drape, Math.abs(y - lift - sy(x, z))); real = Math.max(real, Math.abs(y - lift - heightAt(x, z))); lo = Math.min(lo, y); hi = Math.max(hi, y);
+      }
+      const L = bishop.LM, inn = W0.inn.position;
+      return { m: { verts: P.count, drape, real, rise: hi - lo, size: M.userData.size, slope: M.userData.slope, up: M.userData.up, at: bishop.worldToLl(M.userData.spot.x, M.userData.spot.z), ll: { lat: L.m.lat, lon: L.m.lon } },
+        heights: { loaded: bishop.heightsLoaded(), near: bishop.NEAR.n, far: bishop.FAR.n, nearHalf: bishop.NEAR.half, exaggeration: bishop.EXAGGERATION },
+        inn: { dist: Math.hypot(inn.x - L.inn.x, inn.z - L.inn.z), y: inn.y, ground: heightAt(L.inn.x, L.inn.z) },
+        backdropTris: W0.backdrop.userData.tris, rocks: W0.rock.geometry.attributes.position.count / 3 };
+    },
     surfaceAt, autoClub: () => autoClub(),
     // put the ball down anywhere and set up the shot (auto club) as if it had come to rest there
     place: (x, z) => { ball.place(x, z); G.manualClub = false; prepareShot(0.2); cam.tt = cam.dur; return { lie: ball.lie, club: G.club }; },
     // a windless shot from (x, z) with a given lie: carry / total / roll in yards
-    sim: (club, power, x, z, lie) => {
-      const b = new Ball(); b.place(x, z); if (lie) b.lie = lie; b.strike(club, power, 0, { x: 0, z: 0 });
-      for (let i = 0; i < 240 * 60 && (b.state === 'flight' || b.state === 'roll'); i++) b.step(1 / 240);
-      const tot = Math.hypot(b.p.x - x, b.p.z - z);
-      return { carry: b.carry * YD, total: tot * YD, roll: (tot - b.carry) * YD, end: surfaceAt(b.p.x, b.p.z), x: b.p.x, z: b.p.z };
+    // opts: { wind: {x, z}, curve: -1..1, frame: seconds per step (default 1/240) }
+    sim: (club, power, x, z, lie, yaw = 0, opts = {}) => {
+      const b = new Ball(); b.place(x, z); if (lie) b.lie = lie; b.strike(club, power, yaw, opts.wind || { x: 0, z: 0 }, opts.curve || 0);
+      const fr = opts.frame || DT; let lip = 0;
+      for (let i = 0, n = Math.ceil(60 / fr); i < n && (b.state === 'flight' || b.state === 'roll'); i++) { b.step(fr); lip += b.events.filter((e) => e.type === 'lip').length; b.events.length = 0; }
+      const tot = Math.hypot(b.p.x - x, b.p.z - z), dx = Math.sin(yaw), dz = -Math.cos(yaw), lx = b.p.x - x, lz = b.p.z - z;
+      return { carry: b.carry * YD, total: tot * YD, roll: (tot - b.carry) * YD, end: surfaceAt(b.p.x, b.p.z), x: b.p.x, z: b.p.z, state: b.state, lip,
+        apex: b.apex * YD, descent: b.landAngle, lateral: (lx * -dz + lz * dx) * YD /* + = right of the aim line */, t: b.t };
+    },
+    // a putt rolling at the cup from `dist` metres away (offset: sideways miss in metres) at `speed` m/s: does it drop or lip out?
+    cupTest: (speed, dist = 0.6, offset = 0) => {
+      const a = Math.atan2(TEE.x - CUP.x, TEE.z - CUP.z), sx = Math.sin(a), sz = Math.cos(a);
+      const b = new Ball(); b.place(CUP.x + sx * dist - sz * offset, CUP.z + sz * dist + sx * offset); b.lie = 'green'; b.club = CLUBS.putter; b.wind = { x: 0, z: 0 };
+      b.t = 0; b.rollT = 0; b.state = 'roll'; b.v.x = -sx * speed; b.v.z = -sz * speed; b.w.x = b.v.z / BALL_R; b.w.z = -b.v.x / BALL_R;
+      let lip = 0;
+      for (let i = 0; i < 240 * 20 && b.state === 'roll'; i++) { b.step(DT); lip += b.events.filter((e) => e.type === 'lip').length; b.events.length = 0; }
+      return { state: b.state, lip, left: Math.hypot(b.p.x - CUP.x, b.p.z - CUP.z) };
     },
     // the green's own geometry and a ball released at (x, z) with a tiny nudge: does gravity alone carry it off?
     green: GREEN, greenDist,
     settle: (x, z) => {
       const b = new Ball(); b.place(x, z); b.lie = 'green'; b.club = CLUBS.putter; b.wind = { x: 0, z: 0 }; b.t = 0; b.rollT = 0; b.v.x = 0.001; b.state = 'roll';
-      for (let i = 0; i < 240 * 30 && b.state === 'roll'; i++) b.step(1 / 240);
+      for (let i = 0; i < 240 * 30 && b.state === 'roll'; i++) b.step(DT);
       return { end: surfaceAt(b.p.x, b.p.z), moved: Math.hypot(b.p.x - x, b.p.z - z) };
     },
-    shoot: (club, power, angleDeg = 0) => { if (club) setClub(club, true); return shoot(G.club, power, G.yaw + angleDeg * Math.PI / 180); },
+    shoot: (club, power, angleDeg = 0, curve = 0) => { if (club) setClub(club, true); G.curve = curve; return shoot(G.club, power, G.yaw + angleDeg * Math.PI / 180); },
+    // showcase lens: hold a different field of view (baseFov is reset on the next resize)
+    setFov: (v) => { baseFov = v; camera.fov = v; camera.updateProjectionMatrix(); },
     freeCam: (...a) => { cam.free = a.length ? a : null; update(1 / 30); post.render(); },
     advance: (sec, step = 1 / 30) => { for (let t = 0; t < sec; t += step) update(step); post.render(); },
     flyAt: (sec) => { fly.t = sec; },
@@ -911,7 +1050,7 @@ window.addEventListener('error', (e) => errors.push(String(e.message)));
     resetHole();
     G.state = 'ready';
     $('start').disabled = false; $('start').textContent = 'Tap to tee off';
-    $('load-step').textContent = weather.live ? `Live: ${weather.label}, ${Math.round(weather.tempF)}°F in Morro Bay` : 'Weather offline · using typical Morro Bay conditions';
+    $('load-step').textContent = weather.live ? `Live: ${weather.label}, ${Math.round(weather.tempF)}°F in ${MAP.place}` : `Weather offline · using typical ${MAP.place} conditions`;
     renderer.setAnimationLoop(frame);
     if (params.has('autostart')) $('start').click();
   } catch (e) {

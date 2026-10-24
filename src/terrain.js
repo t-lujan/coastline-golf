@@ -2,10 +2,48 @@
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLSL_NOISE } from './noise.js';
-import { BOUNDS, heightAt, sandiness, fairwayDist, greenDist, bunkerDist, teeDist, GREEN, ROCK, fbm } from './course.js';
+import { BOUNDS, PAINT, WATER_LEVEL, heightAt, sandiness, fairwayDist, greenDist, bunkerDist, teeDist, ROCK, fbm } from './course.js';
 
-// course painting area (fine distance fields)
-export const PAINT = { minX: -110, maxX: 110, minZ: -210, maxZ: 250 };
+// PAINT (course painting area for the fine distance fields) comes from the active map
+
+
+// fairway and first cut (the coastal links: crisp edges and stripes)
+const FAIRWAY_COAST = `float wob = (nF - 0.5) * 0.5;
+          // first cut, then fairway with crisp diagonal mowing stripes
+          float stripe = smoothstep(0.46, 0.54, abs(fract((p.x * 0.35 + p.y * 0.94) / 10.0) - 0.5) * 2.0);
+          vec3 fw = mix(vec3(0.13, 0.33, 0.045), vec3(0.20, 0.43, 0.075), stripe) * (0.94 + nF * 0.1);
+          float cut = edgeS(P.r - 2.4 + wob, 0.5);
+          col = mix(col, vec3(0.10, 0.25, 0.04) * (0.9 + nF * 0.2), cut);
+          float fwk = edgeS(P.r + wob * 0.3, 0.25);
+          col = mix(col, fw, fwk);`;
+// ground colours under the course paint: the coastal links (Morro Rock) and the dry inland valley (Bishop Peak)
+const PALETTES = {
+  coast: { ground: `vec3 rough = mix(vec3(0.085, 0.17, 0.035), vec3(0.15, 0.24, 0.055), nz);
+        rough = mix(rough, vec3(0.30, 0.25, 0.09), smoothstep(0.55, 0.8, nB + nF * 0.2) * 0.55);
+        vec3 hills = mix(vec3(0.34, 0.27, 0.10), vec3(0.45, 0.36, 0.15), nz);
+        vec3 col = mix(rough, hills, smoothstep(10.0, 30.0, hgt + nz * 8.0));` },
+  // dry golden grass (straw and tan, greener in the swales), olive chaparral on the steep banks; height-agnostic, the
+  // valley floor tilts. The fairway fades out through a first cut and a band of semi-rough instead of a hard edge.
+  inland: { ground: `vec3 rough = mix(vec3(0.47, 0.36, 0.19), vec3(0.61, 0.48, 0.28), nz) * (0.86 + nG * 0.2) * (0.9 + 0.2 * cgN2(vec2(p.x * 1.7, p.y * 5.3) + nF));
+        rough = mix(rough, vec3(0.28, 0.3, 0.13), smoothstep(0.58, 0.85, nB + nF * 0.25) * 0.4);
+        vec3 col = rough;
+        vec3 sn = normalize(cross(dFdx(vWP), dFdy(vWP)));
+        col = mix(col, vec3(0.21, 0.24, 0.12) * (0.8 + nF * 0.4), smoothstep(0.3, 0.6, 1.0 - abs(sn.y)) * 0.65);`,
+    // the same, starting from the backdrop's land colour (vBase) so the hole and the hills share one ground
+    groundBase: `vec3 col = vBase * (0.86 + nG * 0.2) * (0.9 + 0.2 * cgN2(vec2(p.x * 1.7, p.y * 5.3) + nF)) * (0.88 + 0.24 * nz);
+        vec3 sn = normalize(cross(dFdx(vWP), dFdy(vWP)));
+        col = mix(col, vec3(0.21, 0.24, 0.12) * (0.8 + nF * 0.4), smoothstep(0.3, 0.6, 1.0 - abs(sn.y)) * 0.5);`,
+    fairway: `float wob = (nF - 0.5) * 0.35 + (nM - 0.5) * 0.7;
+          // semi-rough: a band where the green turf thins out into the straw-coloured rough
+          float semi = 1.0 - smoothstep(0.4, 2.6, P.r - 2.0 + wob * 0.6 + (nG - 0.5) * 0.8);
+          col = mix(col, mix(vec3(0.2, 0.27, 0.09), vec3(0.36, 0.37, 0.18), nF * 0.7 + nG * 0.3), semi * 0.85);
+          float cut = edgeS(P.r - 1.8 + wob * 0.5, 0.35);
+          col = mix(col, vec3(0.12, 0.25, 0.055) * (0.9 + nF * 0.2), cut);
+          float stripe = smoothstep(0.3, 0.7, abs(fract((p.x * 0.35 + p.y * 0.94) / 11.0) - 0.5) * 2.0);
+          vec3 fw = mix(vec3(0.13, 0.28, 0.055), vec3(0.165, 0.33, 0.07), stripe) * (0.94 + nF * 0.1);
+          float fwk = edgeS(P.r + wob * 0.25, 0.3);
+          col = mix(col, fw, fwk);` },
+};
 
 function bakePaint(res) {
   const w = res, hgt = Math.round(res * (PAINT.maxZ - PAINT.minZ) / (PAINT.maxX - PAINT.minX));
@@ -21,14 +59,14 @@ function bakePaint(res) {
   return tex;
 }
 
-export function bakeDepth(res = 256) {
+export function bakeDepth(res = 256, hasRock = true) {
   // R: water depth (0..14 m). G: land height (0..32 m), box-blurred over ~15 m so the mist can fade out softly
   // wherever the ground (or the rock) rises toward it instead of cutting a hard line through the terrain.
   const data = new Uint8Array(res * res * 4), land = new Float32Array(res * res);
   for (let j = 0; j < res; j++) for (let i = 0; i < res; i++) {
     const x = BOUNDS.minX + (i + 0.5) / res * (BOUNDS.maxX - BOUNDS.minX), z = BOUNDS.minZ + (j + 0.5) / res * (BOUNDS.maxZ - BOUNDS.minZ);
-    let h = heightAt(x, z);
-    const rr = Math.hypot((x - ROCK.x) / ROCK.rx, (z - ROCK.z) / ROCK.rz); if (rr < 1.2) h = Math.max(h, 2);
+    let h = heightAt(x, z) - WATER_LEVEL;
+    const rr = hasRock ? Math.hypot((x - ROCK.x) / ROCK.rx, (z - ROCK.z) / ROCK.rz) : 9; if (rr < 1.2) h = Math.max(h, 2);
     const k = (j * res + i) * 4, v = Math.max(0, Math.min(255, Math.round(-h / 14 * 255)));
     data[k] = v; data[k + 2] = v; data[k + 3] = 255;
     land[j * res + i] = rr < 1.36 ? 32 : Math.max(0, h);   // the rock's waterline bulge and boulders reach past its ellipse
@@ -59,7 +97,8 @@ function bakeAO(x, z, h) {
   return Math.max(0.45, 1 - occ * 2.6);
 }
 
-export function createTerrain({ segX, segZ, paintRes, bounds = BOUNDS, paint: paintIn, offset = 0, ao = true, warp = false }) {
+export function createTerrain({ segX, segZ, paintRes, bounds = BOUNDS, paint: paintIn, offset = 0, ao = true, warp = false, style = 'coast', baseColor = null }) {
+  const PL = PALETTES[style];
   const B = bounds, W = B.maxX - B.minX, D = B.maxZ - B.minZ, cx = (B.minX + B.maxX) / 2, cz = (B.minZ + B.maxZ) / 2;
   const geo = new THREE.PlaneGeometry(W, D, segX, segZ); geo.rotateX(-Math.PI / 2);
   geo.translate(cx, 0, cz);
@@ -71,6 +110,8 @@ export function createTerrain({ segX, segZ, paintRes, bounds = BOUNDS, paint: pa
     const x = pos.getX(i), z = pos.getZ(i), h = heightAt(x, z);
     pos.setY(i, h); sand[i] = sandiness(x, z); aoA[i] = ao ? bakeAO(x, z, h) : 1;
   }
+  // a map can hand in the land colour its backdrop uses (vec3 per vertex), so the playable ground and the hills around it are one surface
+  if (baseColor) { const c = new Float32Array(pos.count * 3), o = [0, 0, 0]; for (let i = 0; i < pos.count; i++) { baseColor(pos.getX(i), pos.getZ(i), o); c.set(o, i * 3); } geo.setAttribute('aBase', new THREE.BufferAttribute(c, 3)); }
   geo.setAttribute('aSand', new THREE.BufferAttribute(sand, 1));
   geo.setAttribute('aAO', new THREE.BufferAttribute(aoA, 1));
   geo.deleteAttribute('uv');
@@ -82,12 +123,12 @@ export function createTerrain({ segX, segZ, paintRes, bounds = BOUNDS, paint: pa
     sh.uniforms.uPaint = { value: paint };
     sh.uniforms.uPaintB = { value: new THREE.Vector4(PAINT.minX, PAINT.minZ, PAINT.maxX - PAINT.minX, PAINT.maxZ - PAINT.minZ) };
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aSand; attribute float aAO; varying float vSand; varying float vAO; varying vec3 vWP;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSand = aSand; vAO = aAO; vWP = (modelMatrix * vec4(position,1.0)).xyz;');
+      .replace('#include <common>', `#include <common>\nattribute float aSand; attribute float aAO; varying float vSand; varying float vAO; varying vec3 vWP;${baseColor ? '\nattribute vec3 aBase; varying vec3 vBase;' : ''}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\nvSand = aSand; vAO = aAO; vWP = (modelMatrix * vec4(position,1.0)).xyz;${baseColor ? ' vBase = aBase;' : ''}`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
         ${GLSL_NOISE}
-        uniform sampler2D uPaint; uniform vec4 uPaintB; varying float vSand; varying float vAO; varying vec3 vWP;
+        uniform sampler2D uPaint; uniform vec4 uPaintB; varying float vSand; varying float vAO; varying vec3 vWP;${baseColor ? ' varying vec3 vBase;' : ''}
         float edgeS(float d, float soft){ float w = fwidth(d) + soft; return 1.0 - smoothstep(-w, w, d); }
         float gTurf; float gSandK;`)
       .replace('#include <color_fragment>', `#include <color_fragment>
@@ -95,10 +136,7 @@ export function createTerrain({ segX, segZ, paintRes, bounds = BOUNDS, paint: pa
         float nB = cgN2(p * 0.018), nM = cgN2(p * 0.11), nF = cgN2(p * 0.9), nG = cgN2(p * 3.1);
         float nz = nM * 0.6 + nF * 0.4;
         // rough: deep coastal green with patches of dry golden grass
-        vec3 rough = mix(vec3(0.085, 0.17, 0.035), vec3(0.15, 0.24, 0.055), nz);
-        rough = mix(rough, vec3(0.30, 0.25, 0.09), smoothstep(0.55, 0.8, nB + nF * 0.2) * 0.55);
-        vec3 hills = mix(vec3(0.34, 0.27, 0.10), vec3(0.45, 0.36, 0.15), nz);
-        vec3 col = mix(rough, hills, smoothstep(10.0, 30.0, hgt + nz * 8.0));
+        ${baseColor && PL.groundBase ? PL.groundBase : PL.ground}
         // beach sand: warm, darker and wet near the water, sea floor below
         vec3 sandC = mix(vec3(0.62, 0.48, 0.30), vec3(0.74, 0.60, 0.40), nz) * (0.92 + nG * 0.12);
         vec3 wet = vec3(0.33, 0.26, 0.17), floorC = vec3(0.30, 0.27, 0.19);
@@ -113,14 +151,7 @@ export function createTerrain({ segX, segZ, paintRes, bounds = BOUNDS, paint: pa
         vec2 uv = (p - uPaintB.xy) / uPaintB.zw;
         if (uv.x > 0.0 && uv.y > 0.0 && uv.x < 1.0 && uv.y < 1.0) {
           vec4 P = (texture2D(uPaint, uv) * 255.0 - 128.0) / 24.0;
-          float wob = (nF - 0.5) * 0.5;
-          // first cut, then fairway with crisp diagonal mowing stripes
-          float stripe = smoothstep(0.46, 0.54, abs(fract((p.x * 0.35 + p.y * 0.94) / 10.0) - 0.5) * 2.0);
-          vec3 fw = mix(vec3(0.13, 0.33, 0.045), vec3(0.20, 0.43, 0.075), stripe) * (0.94 + nF * 0.1);
-          float cut = edgeS(P.r - 2.4 + wob, 0.5);
-          col = mix(col, vec3(0.10, 0.25, 0.04) * (0.9 + nF * 0.2), cut);
-          float fwk = edgeS(P.r + wob * 0.3, 0.25);
-          col = mix(col, fw, fwk);
+          ${PL.fairway || FAIRWAY_COAST}
           // tee box
           float tk = edgeS(P.a, 0.12);
           col = mix(col, mix(vec3(0.15, 0.38, 0.06), vec3(0.21, 0.46, 0.09), step(0.5, fract(p.x / 1.5))), tk);

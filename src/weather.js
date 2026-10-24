@@ -1,6 +1,6 @@
 import { HEADING } from './course.js';
-// Live conditions for Morro Bay from Open-Meteo (free, no key). Falls back to typical coastal conditions.
-const URL = 'https://api.open-meteo.com/v1/forecast?latitude=35.37&longitude=-120.85' +
+// Live conditions for the active map's site (Morro Bay, or San Luis Obispo) from Open-Meteo (free, no key). Falls back to typical conditions.
+const url = (m) => `https://api.open-meteo.com/v1/forecast?latitude=${m.weatherLat}&longitude=${m.weatherLon}` +
   '&current=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,cloud_cover,visibility,weather_code,is_day' +
   '&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=America%2FLos_Angeles';
 
@@ -8,12 +8,12 @@ const FALLBACK = { tempF: 61, windMph: 10, windFrom: 300, gustMph: 14, cloud: 35
 
 export function compass(deg) { return ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'][Math.round(((deg % 360) + 360) % 360 / 22.5) % 16]; }
 
-export async function getWeather(params) {
+export async function getWeather(params, map) {
   let w = { ...FALLBACK };
   if (params.get('weather') !== 'offline') {
     try {
       const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 4500);
-      const r = await fetch(URL, { signal: ctl.signal }); clearTimeout(t);
+      const r = await fetch(url(map), { signal: ctl.signal }); clearTimeout(t);
       if (r.ok) {
         const c = (await r.json()).current;
         w = { tempF: c.temperature_2m, windMph: c.wind_speed_10m, windFrom: c.wind_direction_10m, gustMph: c.wind_gusts_10m ?? c.wind_speed_10m,

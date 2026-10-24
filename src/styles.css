@@ -49,6 +49,15 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 #load-bar { height: 100%; background: linear-gradient(90deg, var(--teal), var(--aqua)); transform: scaleX(0.02); transform-origin: left; transition: transform .35s ease; }
 .load-step { font-size: 13px; color: rgba(225, 245, 243, .78); min-height: 1.4em; margin: 0 0 18px; }
 #start { min-width: 210px; }
+.map-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 auto 18px; max-width: 380px; }
+.map-choice { appearance: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 68px; padding: 10px 8px; border-radius: 16px; border: 1.5px solid var(--line);
+  background: rgba(225, 245, 243, .08); color: var(--white); text-align: center; touch-action: manipulation; -webkit-user-select: none; user-select: none; transition: background .2s ease, transform .15s ease, border-color .2s ease; }
+.map-choice b { font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
+.map-choice span { font-size: 12px; color: rgba(225, 245, 243, .72); }
+.map-choice:active { transform: scale(.97); }
+.map-choice[aria-pressed="true"] { background: var(--teal); border-color: transparent; color: var(--navy); box-shadow: 0 6px 24px rgba(184, 230, 230, .3); }
+.map-choice[aria-pressed="true"] span { color: rgba(40, 40, 63, .75); }
+.map-choice:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 
 /* flyover title */
 #flytitle { position: fixed; left: 0; right: 0; bottom: calc(14vh + var(--sab)); text-align: center; z-index: 8; pointer-events: none; text-shadow: 0 2px 24px rgba(10, 12, 30, .55); }
@@ -146,3 +155,4 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+#curve { position: fixed; left: 50%; top: calc(64px + var(--sat) + 28px); transform: translateX(-50%); z-index: 12; font-size: 12px; font-weight: 650; padding: 4px 10px; border-radius: 10px; background: rgba(20, 30, 40, .55); color: #fff; pointer-events: none; }

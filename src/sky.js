@@ -7,7 +7,7 @@ export function createSky() {
   const uniforms = {
     uZen: { value: new THREE.Color() }, uHor: { value: new THREE.Color() }, uSunCol: { value: new THREE.Color() },
     uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
-    uNight: { value: 0 }, uCloud: { value: 0.3 }, uTime: { value: 0 }, uFog: { value: 0 }, uWind: { value: new THREE.Vector2(1, 0) },
+    uNight: { value: 0 }, uWarm: { value: 1 }, uHorPow: { value: 3.2 }, uCloud: { value: 0.3 }, uTime: { value: 0 }, uFog: { value: 0 }, uWind: { value: new THREE.Vector2(1, 0) },
   };
   const mat = new THREE.ShaderMaterial({
     uniforms, side: THREE.BackSide, depthWrite: false, fog: false,
@@ -15,7 +15,7 @@ export function createSky() {
       varying vec3 vDir;
       void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position,1.); gl_Position = p.xyww; }`,
     fragmentShader: /* glsl */`
-      uniform vec3 uZen, uHor, uSunCol, uSunDir, uMoonDir; uniform float uNight, uCloud, uTime, uFog; uniform vec2 uWind;
+      uniform vec3 uZen, uHor, uSunCol, uSunDir, uMoonDir; uniform float uNight, uWarm, uHorPow, uCloud, uTime, uFog; uniform vec2 uWind;
       varying vec3 vDir;
       ${GLSL_NOISE}
       float fbm(vec2 p){ float s = 0., a = .5; for (int i = 0; i < 5; i++){ s += a * cgN2(p); p = p * 2.03 + vec2(1.7, 9.2); a *= .5; } return s; }
@@ -27,8 +27,8 @@ export function createSky() {
         float low = 1.0 - smoothstep(0.0, 0.4, L.y);            // 1 near sunrise/sunset
         float day = 1.0 - uNight;
         // gradient: deep zenith, a soft bright band at the horizon
-        vec3 col = mix(uZen, uHor, pow(1.0 - yy, 3.2));
-        col += uSunCol * pow(sdp, 3.0) * 0.28 * (0.25 + low) * day;           // warm sun side
+        vec3 col = mix(uZen, uHor, pow(1.0 - yy, uHorPow));
+        col += uSunCol * pow(sdp, 3.0) * 0.28 * (0.25 + low) * day * uWarm;   // warm sun side
         col *= 1.0 - 0.14 * max(-sd, 0.0) * day;                               // cooler opposite the sun
         col = mix(col, uHor, smoothstep(0.0, -0.06, y));
         // clouds
