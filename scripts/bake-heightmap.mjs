@@ -11,7 +11,7 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { inflateSync, deflateSync } from 'node:zlib';
 
-const SITE = { lat: 35.2845, lon: -120.6685 };   // the Bishop Peak hole site (the dogleg corner), see src/maps/bishop.js
+const SITE = { lat: 35.2845, lon: -120.6685 };   // BAKE_SITE in src/maps/bishop.js: the fixed georeference of the baked PNGs (the hole itself has moved; the map shifts these centres)
 const MAPS = [
   { file: 'bishop-height.png', ce: -1500, cn: 500, half: 5000, size: 1024, z: 14, sub: 2 },
   { file: 'bishop-height-far.png', ce: -1500, cn: 500, half: 15000, size: 256, z: 11, sub: 3 },

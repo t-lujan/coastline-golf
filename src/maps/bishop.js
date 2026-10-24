@@ -2,16 +2,18 @@
 //
 // Real-world mapping: the hole site is the dogleg corner at SITE (lat/lon) and is the world origin. Every landmark is
 // placed at its true compass bearing and true distance from it (equirectangular projection). The hole plays along
-// world -Z, which points at compass bearing HEADING (WSW, toward Cerro San Luis and the Madonna Inn); after the corner
-// it doglegs right toward Bishop Peak, which rises behind the green. Real elevation comes from a baked Terrarium
+// world -Z, which points at compass bearing HEADING (N, up the farmland just north of the Madonna Inn, Cerro San Luis
+// and its M ahead/left, Bishop Peak far to the NW); after the corner it doglegs left toward the foot of Cerro San Luis. Real elevation comes from a baked Terrarium
 // heightmaps (scripts/bake-heightmap.mjs); the playable hole is hand-shaped on top of a smooth fit of the real valley floor.
 import { fbm } from './morro.js';
 import heightUrl from './bishop-height.png?url';
 import heightFarUrl from './bishop-height-far.png?url';
 
 export const ID = 'bishop';
-export const HEADING = 228;
-export const SITE = { lat: 35.2845, lon: -120.6685 };
+export const HEADING = 354;
+export const SITE = { lat: 35.27150, lon: -120.67400 };
+// the baked heightmap PNGs are georeferenced to this fixed point (the hole's first site); see scripts/bake-heightmap.mjs
+export const BAKE_SITE = { lat: 35.2845, lon: -120.6685 };
 export const BASE = 7.0;               // ground height at the site (world y; real ground there is SITE_ELEV metres above sea level)
 const RAD = Math.PI / 180, M_LAT = 111200, M_LON = 111200 * Math.cos(35.28 * RAD);
 const HC = Math.cos(HEADING * RAD), HS = Math.sin(HEADING * RAD);
@@ -36,47 +38,50 @@ const LM_DEF = {
 };
 export const LM = {};
 for (const [k, v] of Object.entries(LM_DEF)) LM[k] = { ...v, ...llToWorld(v.lat, v.lon) };
-const SITE_ELEV = 58;                  // real ground elevation at the site (m), from the baked heightmap
-// relief above the valley floor is drawn true to life up to ~1.2 km from the hole and x1.2 beyond ~2.8 km (within the
+const SITE_ELEV = 54;                  // real ground elevation at the site (m), from the baked heightmap
+// relief above the valley floor is drawn true to life up to ~1.8 km from the hole (Cerro San Luis and the M) and x1.2 beyond ~3.4 km (within the
 // brief's 1.0-1.3), so the far morros (Bishop Peak, Chumash, Romualdo) still stand up over the near foothills at their true
 // distances and bearings; below the site (Laguna Lake, the creek) it is true to life
 export const EXAGGERATION = { near: 1.0, far: 1.2 };
-const exAt = (r) => EXAGGERATION.near + (EXAGGERATION.far - EXAGGERATION.near) * sstep(1200, 2800, r);
+const exAt = (r) => EXAGGERATION.near + (EXAGGERATION.far - EXAGGERATION.near) * sstep(1800, 3400, r);
 export const yOf = (elev, x = 0, z = 0) => { const d = elev - SITE_ELEV; return BASE + (d > 0 ? d * exAt(Math.hypot(x, z)) : d); };
 
 // the hole's own ground follows the real valley: a least-squares quadratic through the baked heights (smoothed over
-// ~200 m) across the hole, tamed to 70 %: the tee shot falls gently to the corner and the approach climbs ~10 m to a
-// green set into the foot of Cerro San Luis's north spur (fit by cg-tools/terr/fit.mjs; inputs clamped to the fit area)
-const QF = [63.269, 3.822, -5.203, 0.437, -1.837, 1.867], K_LOCAL = 0.7;
+// ~120 m) across the farmland, true to life: the hole climbs ~8 m gently from the tee to the green
+// (fit by cg-tools/terr/fit11.mjs; inputs clamped to the fit area)
+const QF = [54.283, 0.198, -4.162, 0.91, -0.422, 0.802], K_LOCAL = 1.0;
 const clampF = (v, a, b) => Math.min(b, Math.max(a, v));
-const qfit = (x, z) => { const u = clampF(x, -250, 360) / 100, v = clampF(z, -250, 360) / 100; return QF[0] + QF[1] * u + QF[2] * v + QF[3] * u * u + QF[4] * u * v + QF[5] * v * v; };
+const qfit = (x, z) => { const u = clampF(x, -200, 80) / 100, v = clampF(z, -120, 240) / 100; return QF[0] + QF[1] * u + QF[2] * v + QF[3] * u * u + QF[4] * u * v + QF[5] * v * v; };
 const Q0 = qfit(0, 0);
 export const baseY = (x, z) => BASE + K_LOCAL * (qfit(x, z) - Q0);
 
 // ---------- the hole ----------
-export const BOUNDS = { minX: -330, maxX: 440, minZ: -330, maxZ: 420 };
-export const PAINT = { minX: -70, maxX: 250, minZ: -125, maxZ: 340 };
-export const TEE = { x: 0, z: 292, w: 7, d: 5, h: baseY(0, 292) + 0.9, bank: 24 };
-const g0 = along(298, 190);
+// a short par 4 on the farmland north of the Madonna Inn: the tee sits ~260 m north of the Inn, the drive plays north up
+// the field to the corner, then the approach turns left (west) to a green near the field's north-west edge, short of
+// Fernandez Road; US-101 stays >80 m to the east
+export const BOUNDS = { minX: -330, maxX: 330, minZ: -330, maxZ: 420 };
+export const PAINT = { minX: -160, maxX: 50, minZ: -80, maxZ: 230 };
+export const TEE = { x: 0, z: 184, w: 7, d: 5, h: baseY(0, 184) + 0.9, bank: 24 };
+const g0 = along(280, 120);
 export const GREEN = { x: Math.round(g0.x * 10) / 10, z: Math.round(g0.z * 10) / 10, rx: 16, rz: 13.5 };
-export const CUP = { x: GREEN.x + 3.6, z: GREEN.z - 3.9 };
-export const FAIRWAY = [[0, 275], [0, 190], [0, 110], [0, 40], [8, 8], [30, -4], [72, -20], [112, -33], [GREEN.x - 17, GREEN.z + 7]];
+export const CUP = { x: GREEN.x - 3.6, z: GREEN.z - 3.9 };
+export const FAIRWAY = [[0, 168], [0, 110], [0, 50], [-6, 10], [-26, -8], [-60, -18], [GREEN.x + 17, GREEN.z + 4]];
 export const FAIRWAY_HALF = 14;
 export const CORNER = { x: 0, z: 0 };
-// the first shot aims here from the tee (the cup is round the corner, behind the trees)
-export const AIM_VIA = { x: 0, z: 62, until: 330 };
+// the first shot aims here from the tee (the cup is round the corner to the left)
+export const AIM_VIA = { x: 0, z: -4, until: 200 };
 // from: where the shot into the bunker comes from, so its lip is built up on the far side
 export const BUNKERS = [
-  { x: -17, z: 68, r: 6.4, face: 1.1, from: [0, 292] },                 // fairway, left of the landing zone (~245 yd carry)
-  { x: 23, z: -2, r: 6.6, face: 1.25, from: [0, 90] },                  // inside the dogleg corner
-  { x: GREEN.x - 17, z: GREEN.z + 13, r: 5.4, face: 0.5, from: [60, -22] },   // greenside, front right
-  { x: GREEN.x + 15, z: GREEN.z - 15, r: 5.0, face: 0.4, from: [60, -22] },   // greenside, back left
+  { x: 17, z: -8, r: 6.4, face: 1.1, from: [0, 184] },                  // through the corner, right (~200 yd carry)
+  { x: -19, z: 22, r: 6.6, face: 1.25, from: [0, 120] },                // inside the dogleg corner
+  { x: GREEN.x + 17, z: GREEN.z + 13, r: 5.4, face: 0.5, from: [-50, -16] },  // greenside, front left
+  { x: GREEN.x - 15, z: GREEN.z - 15, r: 5.0, face: 0.4, from: [-50, -16] },  // greenside, back right
 ];
-export const POND = { x: 136, z: -16, rx: 13, rz: 8.5, a: -0.35 };
+export const POND = { x: -62, z: 30, rx: 12, rz: 8, a: 0.35 };
 export const WATER_LEVEL = baseY(POND.x, POND.z) - 2.4;   // the pond surface (there is no sea here)
 const GREEN_Y = baseY(GREEN.x, GREEN.z);
 export const WASTE = { x: 9999, z: 9999, ax: 0, len: 1, half: 1 };      // no waste area on this hole
-export const PAR = 5;
+export const PAR = 4;
 export const HOLE_M = Math.hypot(TEE.x - CORNER.x, TEE.z - CORNER.z) + Math.hypot(CORNER.x - CUP.x, CORNER.z - CUP.z);
 export const HOLE_YD = Math.round(HOLE_M * 1.09361);
 
@@ -123,8 +128,10 @@ export { fbm };
 // Two baked PNGs (north up, R*256+G = (metres + 100) * 8): NEAR 1024 px over 10 km (~10 m/px, zoom-14 Terrarium tiles)
 // covering Bishop Peak, Chumash Peak, Cerro San Luis, Laguna Lake and the Madonna Inn; FAR 256 px over 30 km for the rest
 // of the Nine Sisters and the hills fading into haze. Centres / sizes must match scripts/bake-heightmap.mjs.
-export const NEAR = { url: heightUrl, ce: -1500, cn: 500, half: 5000, n: 0, data: null };
-export const FAR = { url: heightFarUrl, ce: -1500, cn: 500, half: 15000, n: 0, data: null };
+// The PNG centres are baked relative to BAKE_SITE (ce=-1500, cn=500); shifted here into metres from SITE.
+const BAKE_DE = (BAKE_SITE.lon - SITE.lon) * M_LON, BAKE_DN = (BAKE_SITE.lat - SITE.lat) * M_LAT;
+export const NEAR = { url: heightUrl, ce: -1500 + BAKE_DE, cn: 500 + BAKE_DN, half: 5000, n: 0, data: null };
+export const FAR = { url: heightFarUrl, ce: -1500 + BAKE_DE, cn: 500 + BAKE_DN, half: 15000, n: 0, data: null };
 async function loadMap(M) {
   const blob = await (await fetch(M.url)).blob(), bmp = await createImageBitmap(blob, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
   const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
@@ -177,7 +184,7 @@ export function greenHeight(x, z) {
 }
 export function fairwayShape(x, z) {
   // the fairway rolls a little: a low rise before the corner, then a soft swale on the climb to the green
-  return 0.9 * sstep(260, 120, z) * (1 - sstep(60, -30, z)) + 0.5 * Math.sin(z * 0.045) * sstep(240, 100, z) + 0.45 * Math.sin(x * 0.05 + 1) * sstep(30, 90, x) * sstep(GREEN.x - 10, GREEN.x - 40, x);
+  return 0.6 * sstep(160, 90, z) * (1 - sstep(50, -10, z)) + 0.4 * Math.sin(z * 0.045) * sstep(160, 80, z) + 0.35 * Math.sin(x * 0.05 + 1) * sstep(-20, -50, x) * sstep(GREEN.x + 10, GREEN.x + 40, x);
 }
 // gentle swells on the valley floor (a metre or two over 60-120 m) and low, rounded rises beside the hole
 const rollAt = (x, z) => 1.6 * (fbm(x * 0.009 + 4, z * 0.009) - 0.5) + 0.35 * (fbm(x * 0.05 + 7, z * 0.05) - 0.5);
@@ -219,7 +226,7 @@ export function normalAt(x, z, e = 0.35) {
 // 0..1: inside a protected view from the tee to the Madonna Inn and the M, or from the green to Bishop Peak. Trees and
 // knolls stay out of these cones so the backdrop is not hidden behind the foreground.
 const SIGHTS = [
-  // the Inn sits ~2.2 km out, past the far oaks: its cone runs (slightly wider) all the way to the building
+  // the Inn sits ~260 m behind the tee: its cone runs (slightly wider) all the way to the building
   { from: [TEE.x, TEE.z], to: [LM.inn.x, LM.inn.z], hw: 8, far: Math.hypot(LM.inn.x - TEE.x, LM.inn.z - TEE.z) - 60 },
   { from: [TEE.x, TEE.z], to: [LM.cerro.x, LM.cerro.z], hw: 9 },
   { from: [TEE.x, TEE.z], to: [LM.m.x, LM.m.z], hw: 5 },

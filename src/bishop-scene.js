@@ -29,8 +29,9 @@ const PEAK_FOG = `#ifdef USE_FOG
 // playable terrain are left out. FAR: a coarse warped square out to ~14 km (the rest of the Nine Sisters, the Irish
 // Hills, the Santa Lucia foothills) with the near rectangle cut out; where its cells overlap the near mesh their inner
 // corners are tucked just under it, so the two meet without cracks.
-export const NEAR_RECT = { minX: -2400, maxX: 5200, minZ: -2700, maxZ: 1000 };
-const BANDS_X = [[250, 1150, 16], [2650, 4750, 24]], BANDS_Z = [[-1400, -300, 18]];
+export const NEAR_RECT = { minX: -4000, maxX: 2200, minZ: -5400, maxZ: 1200 };
+// fine over Cerro San Luis / the M (x -950..100, z -1850..-800) and Bishop / Chumash (x -3000..-1250, z -4900..-3100)
+const BANDS_X = [[-950, 100, 16], [-3000, -1250, 24]], BANDS_Z = [[-1850, -800, 18], [-4900, -3100, 24]];
 function axis(a, b, bands, coarse, k) {
   const out = [a]; let v = a;
   while (v < b - 1) {
@@ -130,7 +131,7 @@ export function createBackdrop(level = 'med') {
   };
   const inside = (x, z) => x > R.minX && x < R.maxX && z > R.minZ && z < R.maxZ;
   // far ring: a square warped toward the hole, ~14 km out
-  const n = level === 'high' ? 84 : level === 'low' ? 52 : 68, half = 14000, cx0 = 1600, cz0 = -800, a = 0.22;
+  const n = level === 'high' ? 84 : level === 'low' ? 52 : 68, half = 14000, cx0 = -1500, cz0 = -2500, a = 0.22;
   const warp = (u) => half * (a * u + (1 - a) * u * u * u), fx = [], fz = [];
   for (let i = 0; i <= n; i++) { fx.push(cx0 + warp(i / n * 2 - 1)); fz.push(cz0 + warp(i / n * 2 - 1)); }
   const far = gridMesh(fx, fz, (i, j) => inside(fx[i], fz[j]) && inside(fx[i + 1], fz[j]) && inside(fx[i], fz[j + 1]) && inside(fx[i + 1], fz[j + 1]),
@@ -313,8 +314,8 @@ export function createMadonnaInn(surfaceY = heightAt) {
   for (let i = 0; i < 6; i++) put(new THREE.IcosahedronGeometry(1.4, 0).scale(1, 0.8, 1).translate(-24 + i * 9.5, 1.6, 20.5), [0.16, 0.24, 0.09], 0.2);
   const geo = mergeGeometries(parts); geo.computeVertexNormals();
   const m = new THREE.Mesh(geo, selfLit(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide }), 0.22));
-  // the true place, the facade turned east-north-east toward US-101 as in life, drawn 2.5x so it still reads from the tee ~2.2 km away
-  const S = 2.5; m.rotation.y = faceBearing(70); m.scale.setScalar(S);
+  // the true place, the facade turned east-north-east toward US-101 as in life, drawn true size: it stands ~260 m behind the tee
+  const S = 1.0; m.rotation.y = faceBearing(70); m.scale.setScalar(S);
   let lo = 1e9; for (const [dx, dz] of [[-40, -10], [40, -10], [-40, 20], [40, 20], [0, 0], [100, -10]]) { const c = Math.cos(m.rotation.y), s = Math.sin(m.rotation.y); lo = Math.min(lo, surfaceY(LM.inn.x + (dx * c + dz * s) * S, LM.inn.z + (-dx * s + dz * c) * S)); }
   m.position.set(LM.inn.x, lo - 0.6, LM.inn.z);
   m.frustumCulled = false; m.name = 'madonna-inn'; m.userData.size = 140 * S;
@@ -322,7 +323,7 @@ export function createMadonnaInn(surfaceY = heightAt) {
 }
 
 // ---------- scatter: dry golden grass, chaparral and sage scrub, granite boulders ----------
-const REGION = { x0: -130, x1: 270, z0: -170, z1: 350 };
+const REGION = { x0: -250, x1: 130, z0: -170, z1: 300 };
 const inRegion = (R) => [REGION.x0 + R() * (REGION.x1 - REGION.x0), REGION.z0 + R() * (REGION.z1 - REGION.z0)];
 export function createDryGrass(count, fringe = 0) {
   const P = [], N = [], C = [];
@@ -424,7 +425,7 @@ export function createFarOaks(count, surfaceY = heightAt, midCount = 260) {
   // grove centres first (draws, north slopes, the creek bottoms), then trees clustered round them
   for (let t = 0; seeds.length < count / 9 && t < count * 30; t++) {
     const R0 = NEAR_RECT, x = R0.minX + 150 + rand() * (R0.maxX - R0.minX - 300), z = R0.minZ + 150 + rand() * (R0.maxZ - R0.minZ - 300);
-    if (Math.hypot(x, z) < 400 || rand() > 1.3 - Math.hypot(x - 1200, z + 700) / 4000) continue;     // denser toward the morros the hole looks at
+    if (Math.hypot(x, z) < 400 || rand() > 1.3 - Math.hypot(x + 1200, z + 2500) / 4000) continue;     // denser toward the morros the hole looks at
     const y = heightAt(x, z), el = elevAt(x, z); if (el > 380 || el < 40) continue;
     const e = 30, hx = (heightAt(x + e, z) - heightAt(x - e, z)) / (2 * e), hz = (heightAt(x, z + e) - heightAt(x, z - e)) / (2 * e), sl = Math.hypot(hx, hz);
     const ring = (heightAt(x + 70, z) + heightAt(x - 70, z) + heightAt(x, z + 70) + heightAt(x, z - 70)) / 4, curv = (ring - y) / 70;

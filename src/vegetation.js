@@ -550,7 +550,7 @@ function treeSpotsBishop() {
   const ok = (x, z, clear) => {
     const s = surfaceAt(x, z); if (s === 'water' || s === 'green' || s === 'tee') return false;
     if (nearPlay(x, z) < clear || pondDist(x, z) < 7 || sightK(x, z) > 0.3) return false;
-    return Math.hypot(x - 4, z - 292) > 14;
+    return Math.hypot(x - TEE.x, z - TEE.z) > 14;
   };
   const clearOf = (x, z, minD) => !spots.some((s) => Math.hypot(s.x - x, s.z - z) < minD);
   const grove = (cx, cz, n, rad, { minD = 10.5, clear = 9, sc = [0.75, 1.25], pri = 1 } = {}) => {
