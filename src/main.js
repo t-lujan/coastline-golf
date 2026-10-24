@@ -1,6 +1,6 @@
 // Coastline Golf · Hole 1 · Morro Rock / Bishop Peak (the active map is chosen in maps/index.js)
 import * as THREE from 'three';
-import { TEE, CUP, GREEN, PAR, HOLE_M, HOLE_YD, ROCK, STACKS, BOUNDS, HEADING, MAP_ID, WATER_LEVEL, BUNKERS, heightAt, surfaceAt, greenDist } from './course.js';
+import { TEE, CUP, GREEN, PAR, HOLE_M, HOLE_YD, ROCK, STACKS, BOUNDS, HEADING, MAP_ID, WATER_LEVEL, BUNKERS, heightAt, surfaceAt, greenDist, normalAt } from './course.js';
 import { MAP, MAPS, rememberMap } from './maps/index.js';
 import * as bishop from './maps/bishop.js';
 import { landColor, createBackdrop, createBishopKnobs, createCerroM, createMadonnaInn, createDryGrass, createChaparral, createGranite, createFarOaks } from './bishop-scene.js';
@@ -160,6 +160,18 @@ async function build() {
   W0.tracer = new Ribbon(260, 0xf2fbfa, 0.6, 0.003, 0.016); scene.add(W0.tracer.mesh);
   W0.aimLine = new Ribbon(200, 0xe1f5f3, 0.7, 0.0022, 0.03); scene.add(W0.aimLine.mesh);
   W0.marker = createMarker(); scene.add(W0.marker);
+  // putting break grid: short dashes on a lattice over the green that drift down the fall line (longer + faster = steeper)
+  { const pts = [];
+    for (let x = GREEN.x - GREEN.rx; x <= GREEN.x + GREEN.rx; x += 1.6) for (let z = GREEN.z - GREEN.rz; z <= GREEN.z + GREEN.rz; z += 1.6) {
+      if (greenDist(x, z) > -1.4) continue;
+      const n = normalAt(x, z), sl = Math.hypot(n.x, n.z) / n.y, l = Math.hypot(n.x, n.z) || 1;
+      pts.push({ x, z, dx: n.x / l, dz: n.z / l, sl, ph: Math.random() });
+    }
+    // tapered dash: wide uphill end (-x) narrowing to a point downhill (+x) so the direction reads in a still frame
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, 0, -0.055, -0.5, 0, 0.055, 0.5, 0, 0], 3));
+    const m = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false, fog: false }), pts.length);
+    m.frustumCulled = false; m.visible = false; m.renderOrder = 3; scene.add(m); W0.grid = { mesh: m, pts, on: true };
+  }
   W0.parts = new Particles(900); scene.add(W0.parts.points);
   await loadStep(`Reading ${MAP.place} weather`, 0.75);
   weather = await weatherP;
@@ -314,7 +326,7 @@ window.addEventListener('resize', resize);
 
 // ---------- game state ----------
 const ball = new Ball();
-const G = { state: 'loading', strokes: 0, club: 'driver', manualClub: false, yaw: 0, putts: 0, longest: 0, penalties: 0, t: 0, timeScale: 1, hinted: false, curve: 0 };
+const G = { preview: false, pvSpot: null, pvZoom: 1, lastPower: 1, state: 'loading', strokes: 0, club: 'driver', manualClub: false, yaw: 0, putts: 0, longest: 0, penalties: 0, t: 0, timeScale: 1, hinted: false, curve: 0 };
 const cam = { pos: new V3(), look: new V3(), from: null, to: null, tt: 0, dur: 1, dir: new THREE.Vector2(0, -1) };
 const cupPos = () => new V3(CUP.x, heightAt(CUP.x, CUP.z), CUP.z);
 const distToCup = () => Math.hypot(ball.p.x - CUP.x, ball.p.z - CUP.z);
@@ -331,7 +343,7 @@ function autoClub() {
 }
 function setClub(c, manual = false) {
   G.club = c; G.manualClub = manual;
-  for (const b of document.querySelectorAll('#clubs button')) b.setAttribute('aria-pressed', String(b.dataset.club === c));
+  for (const b of document.querySelectorAll('#clubs button[data-club]')) b.setAttribute('aria-pressed', String(b.dataset.club === c));
 }
 function aimPose(club = G.club, yaw = G.yaw) {
   const putt = club === 'putter', p = ball.p;
@@ -348,11 +360,41 @@ function aimPose(club = G.club, yaw = G.yaw) {
   const lk = new V3(lx, putt ? heightAt(lx, lz) : Math.max(onTee ? 0 : p.y, heightAt(lx, lz)) + 2.2 + ahead * 0.012, lz);
   return { pos, look: lk };
 }
+// landing-zone preview: the camera hangs above and behind the predicted carry spot (default: last full-shot power)
+const pvKey = { k: '', land: { x: 0, z: 0 } };
+function previewLand() {
+  const k = `${G.club},${G.yaw},${G.lastPower},${ball.p.x},${ball.p.z}`;
+  if (k !== pvKey.k) {
+    const pr = predict(ball.p, ball.lie, G.club, G.lastPower, G.yaw, { x: 0, z: 0 }), cp = pr.carryPt || pr.end, len = Math.hypot(cp.x - ball.p.x, cp.z - ball.p.z);
+    pvKey.k = k; pvKey.land = { x: ball.p.x + Math.sin(G.yaw) * len, z: ball.p.z - Math.cos(G.yaw) * len };
+  }
+  return pvKey.land;
+}
+function previewPose() {
+  const l = G.pvSpot || previewLand(), gy = Math.max(0.05, heightAt(l.x, l.z)), z = G.pvZoom, dx = Math.sin(G.yaw), dz = -Math.cos(G.yaw);
+  const cx = l.x - dx * 42 * z, cz = l.z - dz * 42 * z;
+  return { pos: new V3(cx, Math.max(heightAt(cx, cz) + 2, gy + 24 * z), cz), look: new V3(l.x, gy + 1, l.z) };
+}
+function togglePreview(force) {
+  const on = force ?? !G.preview;
+  if (G.state !== 'aim' || on === G.preview || on && G.club === 'putter') return G.preview;
+  G.preview = on; G.pvSpot = null; $('pvtap').hidden = true; drag.on = false; $('dragdot').hidden = true; $('pull').hidden = true; $('power').hidden = true;
+  if (on) { W0.aimLine.set([]); tweenTo(previewPose(), 0.9); } else { W0.marker.visible = false; tweenTo(aimPose(), 0.8); }
+  return G.preview;
+}
+// a tap in the preview flies the camera to look at that spot and labels its distance + surface (aim, club and power untouched)
+function tapPreview(x, z) {
+  if (!G.preview || G.state !== 'aim') return null;
+  G.pvSpot = { x, z }; tweenTo(previewPose(), 0.7);
+  const t = `${yd(Math.hypot(x - ball.p.x, z - ball.p.z))} yd · ${SURF[surfaceAt(x, z)].label}`, el = $('pvtap'); el.textContent = t; el.hidden = false;
+  return t;
+}
 function tweenTo(pose, dur) { cam.from = { pos: camera.position.clone(), look: cam.look.clone() }; cam.to = pose; cam.tt = 0; cam.dur = dur; }
 
 function prepareShot(dur = 1.6) {
+  G.preview = false; G.pvSpot = null; $('pvtap').hidden = true;
   G.yaw = aimYaw();
-  if (!G.manualClub) setClub(autoClub());
+  if (!G.manualClub || ball.lie === 'green') setClub(autoClub());
   G.manualClub = false;
   tweenTo(aimPose(), dur);
   G.state = 'aim';
@@ -377,7 +419,8 @@ function toast(msg, ms = 1600) { const t = $('toast'); t.textContent = msg; t.hi
 // ---------- shots ----------
 function shoot(club, power, yaw) {
   if (G.state !== 'aim') return false;
-  G.strokes++; if (club === 'putter') G.putts++;
+  G.strokes++; if (club === 'putter') G.putts++; else G.lastPower = Math.max(0.3, power);
+  G.preview = false; G.pvSpot = null; $('pvtap').hidden = true;
   G.shotStart = { ...ball.p }; G.shotFromTee = ball.lie === 'tee'; G.cupCheck = false; G.slowmo = false; G.waterHandled = false;
   ball.lipped = false;
   ball.strike(club, power, yaw, weather.wind, club === 'putter' ? 0 : G.curve); G.curve = 0; updateCurveHud();
@@ -545,6 +588,9 @@ function endFlyover(quick) {
 
 // ---------- input ----------
 const drag = { on: false, x0: 0, y0: 0, x: 0, y: 0, id: null };
+const pvPtr = new Map();   // preview: a horizontal drag turns the aim, a pinch zooms, and neither can swing
+const pvTap = { bad: false, t: 0 };   // a tap = one finger, little movement, quick
+const pvZoom = (k) => { G.pvZoom = Math.max(0.5, Math.min(1.8, G.pvZoom * k)); };
 function dragShot() {
   const dx = drag.x - drag.x0, dy = drag.y - drag.y0, len = Math.hypot(dx, dy);
   const scale = 0.34 * Math.min(W, H);
@@ -558,12 +604,23 @@ canvas.addEventListener('pointerdown', (e) => {
   audio.unlock();
   if (G.state === 'flyover') { endFlyover(true); return; }
   if (G.state !== 'aim') return;
+  if (G.preview) { if (pvPtr.size) pvTap.bad = true; else pvTap.bad = false; pvTap.t = performance.now(); pvPtr.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY }); try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic */ } return; }
   if (!G.hinted) { G.hinted = true; $('hint').hidden = true; }
   drag.on = true; drag.id = e.pointerId; drag.x0 = drag.x = e.clientX; drag.y0 = drag.y = e.clientY;
   try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic or already released */ }
   $('dragdot').style.transform = `translate(${e.clientX}px, ${e.clientY}px)`; $('dragdot').hidden = false;
 });
 canvas.addEventListener('pointermove', (e) => {
+  const q = pvPtr.get(e.pointerId);
+  if (q) {
+    if (pvPtr.size === 1) G.yaw += (e.clientX - q.x) * 0.0025;
+    else if (pvPtr.size === 2) {
+      const [a, b] = [...pvPtr.entries()].map(([id, v]) => id === e.pointerId ? { x: e.clientX, y: e.clientY } : v), [c, d] = [...pvPtr.values()];
+      pvZoom(Math.hypot(c.x - d.x, c.y - d.y) / (Math.hypot(a.x - b.x, a.y - b.y) || 1));
+    }
+    if (Math.hypot(e.clientX - q.x0, e.clientY - q.y0) > 10) pvTap.bad = true;
+    pvPtr.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: q.x0, y0: q.y0 }); return;
+  }
   if (!drag.on || e.pointerId !== drag.id) return;
   drag.x = e.clientX; drag.y = e.clientY; updateAim();
 });
@@ -576,6 +633,15 @@ const endDrag = (fire) => (e) => {
 };
 canvas.addEventListener('pointerup', endDrag(true));
 canvas.addEventListener('pointercancel', endDrag(false));
+canvas.addEventListener('pointerup', (e) => {
+  if (pvPtr.has(e.pointerId) && pvPtr.size === 1 && !pvTap.bad && performance.now() - pvTap.t < 600) {
+    const r = canvas.getBoundingClientRect();
+    ray.setFromCamera({ x: (e.clientX - r.left) / r.width * 2 - 1, y: -((e.clientY - r.top) / r.height) * 2 + 1 }, camera); ray.far = 2000;
+    const hit = ray.intersectObjects(W0.ground, false)[0]; if (hit) tapPreview(hit.point.x, hit.point.z);
+  }
+});
+for (const t of ['pointerup', 'pointercancel']) canvas.addEventListener(t, (e) => { pvPtr.delete(e.pointerId); });
+canvas.addEventListener('wheel', (e) => { if (G.preview) { e.preventDefault(); pvZoom(Math.exp(e.deltaY * 0.001)); } }, { passive: false });
 let aimCache = 0;
 function updateCurveHud() { const el = $('curve'); if (!el) return; el.hidden = !G.curve; el.textContent = G.curve < 0 ? `draw ${Math.abs(G.curve) * 100}%` : `fade ${G.curve * 100}%`; }
 function updateAim() {
@@ -605,15 +671,21 @@ function updateAim() {
     land = { x: cp.x, z: cp.z };   // where it lands, draw / fade included
     $('power-label').textContent = `${CLUBS[G.club].name} · ${Math.round(s.power * 100)}% · carry ${yd(len)} yd${G.curve ? (G.curve < 0 ? ' · draw' : ' · fade') : ''}`;
   }
-  W0.aimLine.set(groundLine(ball.p, s.yaw, len, G.club === 'putter' ? 0.25 : Math.max(0.5, len / 150)));
+  if (G.club === 'putter') W0.aimLine.set(groundLine(ball.p, s.yaw, len, 0.25)); else W0.aimLine.set([]);
   W0.marker.visible = true; W0.marker.position.set(land.x, Math.max(0.05, heightAt(land.x, land.z)) + 0.08, land.z);
 }
-for (const b of document.querySelectorAll('#clubs button')) b.addEventListener('click', () => { if (G.state !== 'aim') return; setClub(b.dataset.club, true); tweenTo(aimPose(), 0.6); });
+for (const b of document.querySelectorAll('#clubs button[data-club]')) b.addEventListener('click', () => { if (G.state !== 'aim') return; setClub(b.dataset.club, true); if (G.preview && b.dataset.club === 'putter') togglePreview(false); else if (!G.preview) tweenTo(aimPose(), 0.6); });
+$('btn-preview').addEventListener('click', () => togglePreview());
+$('btn-grid').addEventListener('click', () => { W0.grid.on = !W0.grid.on; });
 window.addEventListener('keydown', (e) => {
   if (G.state === 'aim' && !cam.to) {
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { G.yaw += (e.key === 'ArrowLeft' ? -1 : 1) * (G.club === 'putter' ? 0.01 : 0.02); tweenTo(aimPose(), 0.12); }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { G.yaw += (e.key === 'ArrowLeft' ? -1 : 1) * (G.club === 'putter' ? 0.01 : 0.02); if (!G.preview) tweenTo(aimPose(), 0.12); }
     if ((e.key === ',' || e.key === '.') && G.club !== 'putter') { G.curve = Math.max(-1, Math.min(1, Math.round((G.curve + (e.key === ',' ? -0.5 : 0.5)) * 2) / 2)); G.lastPred = null; updateCurveHud(); if (drag.on) updateAim(); }
-    const k = { 1: 'driver', 2: 'iron', 3: 'wedge', 4: 'putter' }[e.key]; if (k) { setClub(k, true); tweenTo(aimPose(), 0.6); }
+    const k = { 1: 'driver', 2: 'iron', 3: 'wedge', 4: 'putter' }[e.key]; if (k) { setClub(k, true); if (G.preview && k === 'putter') togglePreview(false); else if (!G.preview) tweenTo(aimPose(), 0.6); }
+  }
+  if (G.state === 'aim' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.key === 'z' || e.key === 'Z') togglePreview();
+    else if (e.key === 'Tab' && (document.activeElement === document.body || document.activeElement === canvas) && G.club !== 'putter') { e.preventDefault(); togglePreview(); }
   }
   if (e.key === 'Escape') { $('info').hidden = true; }
 });
@@ -674,7 +746,7 @@ function logIntro(now, rdt) {
   const L = window.__golf.introLog, p = camera.position, d = camera.getWorldDirection(new V3());
   if (L.length < 5000) L.push({ now, rdt, t: fly.t, s: G.state, p: [p.x, p.y, p.z], d: [d.x, d.y, d.z], fov: camera.fov, q: qLevel, dpr: renderer.getPixelRatio(), w: W, h: H });
 }
-const tmp = new V3(), pinV = new V3(), shU = new V3(), shV = new V3(), UP = new V3(0, 1, 0);
+const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpS = new V3(), tmp = new V3(), pinV = new V3(), shU = new V3(), shV = new V3(), UP = new V3(0, 1, 0);
 const ray = new THREE.Raycaster(), DOWN = new V3(0, -1, 0);
 let restKey = '', restOff = 0;
 function meshOffset() {
@@ -794,8 +866,27 @@ function update(rdt) {
   sun.position.copy(sun.target.position).addScaledVector(ld, 400); sun.target.updateMatrixWorld();
 
   W0.tracer.update(camera); W0.aimLine.update(camera, false);
+  if (G.preview) { const l = previewLand(); W0.marker.visible = true; W0.marker.position.set(l.x, Math.max(0.05, heightAt(l.x, l.z)) + 0.08, l.z); }
+  const pb = $('btn-preview'), pbShow = G.state === 'aim' && G.club !== 'putter';
+  if (pb.hidden === pbShow) pb.hidden = !pbShow;
+  if (pb.getAttribute('aria-pressed') !== String(G.preview)) pb.setAttribute('aria-pressed', String(G.preview));
   if (W0.marker.visible) W0.marker.scale.setScalar(Math.max(0.5, camera.position.distanceTo(W0.marker.position) * 0.028));
 
+  const gShow = G.state === 'aim' && G.club === 'putter' && ball.lie === 'green', gb = $('btn-grid'), gr = W0.grid;
+  const hintHide = G.hinted || G.state !== 'aim' || G.preview || (G.club === 'putter' && ball.lie === 'green'), hn = $('hint');
+  if (hn.hidden !== hintHide) hn.hidden = hintHide;
+  if (gb.hidden === gShow) gb.hidden = !gShow;
+  if (gb.getAttribute('aria-pressed') !== String(gr.on)) gb.setAttribute('aria-pressed', String(gr.on));
+  if (gr.mesh.visible !== (gShow && gr.on)) gr.mesh.visible = gShow && gr.on;
+  if (gr.mesh.visible) {
+    const t = performance.now() / 1000;
+    gr.pts.forEach((q, i) => {
+      const sp = 0.2 + q.sl * 25, ph = (q.ph + t * sp / 1.6) % 1, len = 0.2 + Math.min(q.sl, 0.04) * 20, k = Math.sin(Math.PI * ph), o = (ph - 0.5) * 1.5;
+      const x = q.x + q.dx * o, z = q.z + q.dz * o;
+      tmpM.compose(tmp.set(x, heightAt(x, z) + 0.04, z), tmpQ.setFromAxisAngle(UP, Math.atan2(-q.dz, q.dx)), tmpS.set(len * k, 1, 1)); gr.mesh.setMatrixAt(i, tmpM);
+    });
+    gr.mesh.instanceMatrix.needsUpdate = true;
+  }
   updatePin();
   updateWindArrow();
   updateLod(rdt);
@@ -857,6 +948,9 @@ function updateCamera(rdt, dt) {
     camera.lookAt(cam.look);
     if (cam.tt >= cam.dur) cam.to = null;
     return;
+  }
+  if (G.preview && G.state === 'aim') {
+    const pp = previewPose(); camera.position.lerp(pp.pos, damp(5, rdt)); cam.look.lerp(pp.look, damp(5, rdt)); camera.lookAt(cam.look); return;
   }
   const p = ball.p;
   if (G.state === 'flight' || G.state === 'water' || G.state === 'holed') {
@@ -964,7 +1058,7 @@ if (TEST) {
   window.__golf = {
     get state() { return G.state; }, get strokes() { return G.strokes; }, get ball() { return { ...ball.p, state: ball.state, lie: ball.lie }; },
     get fps() { return perf.fps; }, get fpsHistory() { return perf.history.slice(); }, get frameMs() { return { update: +perf.upd.toFixed(2), render: +perf.ren.toFixed(2) }; }, info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }), get quality() { return qLevel; }, get tierChanges() { return tierChanges; }, autoStart, get weather() { return weather; }, errors,
-    get yaw() { return G.yaw; }, get club() { return G.club; }, W0, camera, renderer, scene,
+    get yaw() { return G.yaw; }, get preview() { return G.preview; }, get pvZoom() { return G.pvZoom; }, togglePreview, previewLand, tapPreview, get pvSpot() { return G.pvSpot; }, get pvLabel() { return $('pvtap').hidden ? '' : $('pvtap').textContent; }, get grid() { return { visible: W0.grid.mesh.visible, on: W0.grid.on, count: W0.grid.pts.length }; }, get club() { return G.club; }, W0, camera, renderer, scene,
     hole: { par: PAR, yd: HOLE_YD, m: HOLE_M },
     map: { id: MAP_ID, name: MAP.name, lat: MAP.lat, lon: MAP.lon, weatherLat: MAP.weatherLat, weatherLon: MAP.weatherLon, heading: HEADING },
     // real-world mapping of the Bishop Peak hole: tee / corner / cup as lat-lon, and the landmarks' lat-lon with their world positions

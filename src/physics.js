@@ -13,11 +13,11 @@ const K_AIR = 0.5 * RHO * AREA / MASS;       // ~0.0188 1/m: a = K_AIR * C * v^2
 const K_INERTIA = 0.4;                         // solid sphere: I = 0.4 m r^2
 const RPM = Math.PI / 30;
 // vmax: ball speed (m/s) at full power; launch: degrees; spin: backspin (rad/s) at full power (scales with ball speed); side: sidespin
-// (rad/s) at full draw/fade; spinTau: seconds for the spin to fall by 1/e in the air
+// (rad/s) at full draw/fade; spinTau: seconds for the spin to fall by 1/e in the air; grab: how hard it checks on a green (see impact)
 export const CLUBS = {
-  driver: { name: 'Driver', vmax: 72, launch: 11.5, spin: 2500 * RPM, side: 520 * RPM, spinTau: 22 },
-  iron:   { name: 'Iron',   vmax: 49, launch: 20,   spin: 6800 * RPM, side: 900 * RPM, spinTau: 20 },
-  wedge:  { name: 'Wedge',  vmax: 36.5, launch: 33.5,   spin: 9200 * RPM, side: 1100 * RPM, spinTau: 18 },
+  driver: { name: 'Driver', vmax: 72, launch: 11.5, spin: 2500 * RPM, side: 520 * RPM, spinTau: 22, grab: 0.8 },
+  iron:   { name: 'Iron',   vmax: 49, launch: 20,   spin: 6800 * RPM, side: 900 * RPM, spinTau: 20, grab: 0.1 },
+  wedge:  { name: 'Wedge',  vmax: 36.5, launch: 33.5,   spin: 9200 * RPM, side: 1100 * RPM, spinTau: 18, grab: 0.65 },
   putter: { name: 'Putter', vmax: 5.6, launch: 0,   spin: 0, side: 0, spinTau: 1 },
 };
 // e: normal restitution; mu: friction at impact; keep: share of the along-ground speed that survives a bounce (turf shear);
@@ -144,9 +144,11 @@ export class Ball {
     const dc = Math.hypot(p.x - CUP.x, p.z - CUP.z);
     if (dc < 0.16 && Math.hypot(v.x, v.y, v.z) < 9) { this.hole(); return; }
     const S = SURF[surf], n = normalAt(p.x, p.z);
-    this.bounces++;
     const vn = v.x * n.x + v.y * n.y + v.z * n.z, vin = -vn;
     let tx = v.x - n.x * vn, ty = v.y - n.y * vn, tz = v.z - n.z * vn;
+    // on a green the first two bounces also check by the shot: more grab and a steeper descent bite, a flat low one runs on
+    const steep = Math.min(1.3, Math.max(0, (Math.atan2(vin, Math.hypot(tx, tz)) * 180 / Math.PI - 12) / 30));
+    const chk = this.bounces < 2 && surf === 'green' ? 1.15 - 0.15 * steep - (this.club.grab || 0) * Math.max(0.5, steep) : 1; this.bounces++;
     p.y = gy;
     this.events.push({ type: 'impact', surf, speed: vin, at: { ...p } });
     if (surf === 'sand') {                       // plugs: the ball digs in and barely moves on
@@ -161,7 +163,7 @@ export class Ball {
       const f = j / (K_INERTIA * R);             // spin change from the friction torque (n x k)
       w.x += f * (n.y * kz - n.z * ky); w.y += f * (n.z * kx - n.x * kz); w.z += f * (n.x * ky - n.y * kx);
     }
-    tx *= S.keep; ty *= S.keep; tz *= S.keep;
+    tx *= S.keep * chk; ty *= S.keep * chk; tz *= S.keep * chk;
     const eN = S.e * vin;
     if (eN > 1.2) {                              // hops on
       v.x = tx + n.x * eN; v.y = ty + n.y * eN; v.z = tz + n.z * eN; p.y += 0.002;
