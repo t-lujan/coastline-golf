@@ -549,8 +549,8 @@ function buildFlyover() {
     const keys = [
       f(0.0, -60, 88, 58, G0.x + 520, 80, G0.z - 100),
       f(2.7, 30, 62, 24, G0.x + 260, 46, G0.z - 58),
-      f(5.0, 118, 40, 22, G0.x + 30, 20, G0.z - 22),
-      f(6.9, 176, 27, 42, c.x + 12, c.y, c.z - 8),
+      f(5.0, 118, 37, 22, G0.x + 30, 23, G0.z - 22),     // settle over the green a little high and aimed a little low,
+      f(6.9, 176, 31, 42, c.x + 12, c.y, c.z - 8),       // so the view keeps tipping down onto the flag: one dip, then level out
       f(8.8, 130, 34, 122, 134, heightAt(134, 22) + 1, 22),
       f(10.4, 70, 30, 212, 70, heightAt(70, 70) + 1, 70),
       f(12.6, e.x, e.y, e.z, l.x, l.y, l.z),
