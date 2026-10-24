@@ -16,6 +16,12 @@ const selfLit = (mat, k) => { mat.onBeforeCompile = (sh) => { sh.fragmentShader 
 const toNonIndexed = (g) => { g = g.index ? g.toNonIndexed() : g; for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'color'].includes(k)) g.deleteAttribute(k); return g; };
 // world rotation that turns a model's +z toward a compass bearing
 const faceBearing = (b) => { const a = (b - HEADING) * RAD; return Math.atan2(Math.sin(a), -Math.cos(a)); };
+// the valley haze sits low: thin it over the high ground (Bishop's crown) so the summit rock keeps its own darker, warm
+// colour at 1-2 km instead of fading to a pale blue-white dome. Needs a world-position varying vWP.
+const PEAK_FOG = `#ifdef USE_FOG
+  float fogFactor = (1.0 - exp(- fogDensity * fogDensity * vFogDepth * vFogDepth)) * (1.0 - PEAK_K * smoothstep(PEAK_Y0, PEAK_Y1, vWP.y));
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, fogFactor);
+#endif`.replace('PEAK_K', '0.8').replace('PEAK_Y0', '260.0').replace('PEAK_Y1', '420.0');
 
 // ---------- the backdrop: the real landscape around the hole, two vertex-coloured meshes ----------
 // NEAR: a rectangle round the hole and the morros it looks at (Cerro San Luis ahead, Bishop and Chumash Peak to the
@@ -39,7 +45,7 @@ const bsearch = (arr, v) => { let lo = 0, hi = arr.length - 2; while (lo < hi) {
 // what a patch of hillside is covered with, from its real elevation, slope, aspect and whether it sits in a draw
 const COL = {
   gold0: [0.48, 0.38, 0.21], gold1: [0.62, 0.51, 0.31], green: [0.3, 0.32, 0.14], oak: [0.1, 0.13, 0.06], chap: [0.22, 0.24, 0.13],
-  rock: [0.41, 0.37, 0.3], rock2: [0.55, 0.5, 0.41], lichen: [0.5, 0.4, 0.24], joint: [0.26, 0.24, 0.21], town: [0.3, 0.32, 0.22],
+  rock: [0.34, 0.26, 0.17], rock2: [0.43, 0.34, 0.22], lichen: [0.42, 0.32, 0.17], joint: [0.2, 0.18, 0.15], town: [0.3, 0.32, 0.22],
 };
 const mix3 = (c, d, t) => { c[0] += (d[0] - c[0]) * t; c[1] += (d[1] - c[1]) * t; c[2] += (d[2] - c[2]) * t; };
 export function landColor(x, z, out) {
@@ -104,7 +110,8 @@ function backdropMaterial(offset) {
         float md = length(cameraPosition - vWP), near = 1.0 - smoothstep(700.0, 3000.0, md);
         // dark speckle of individual oak crowns and shrubs on the grass, strongest close up
         float dots = smoothstep(0.72, 0.86, cgN2(vWP.xz * 0.37 + 3.0) * 0.6 + cgN2(vWP.xz * 0.9) * 0.4) * near * 0.3;
-        diffuseColor.rgb *= (0.84 + 0.36 * (m1 * 0.45 + m2 * 0.35 + m3 * 0.2)) * mix(1.0, 0.86 + 0.28 * gul, near) * (1.0 - dots);`);
+        diffuseColor.rgb *= (0.84 + 0.36 * (m1 * 0.45 + m2 * 0.35 + m3 * 0.2)) * mix(1.0, 0.86 + 0.28 * gul, near) * (1.0 - dots);`)
+      .replace('#include <fog_fragment>', PEAK_FOG);
   };
   return mat;
 }
@@ -160,8 +167,8 @@ export function createBishopKnobs(detail = 1) {
       p.setXYZ(i, wx, wy, wz);
       if (vy > 0.4) crest.push(new THREE.Vector3(wx, wy, wz));
       const s = fbm3(vx * 3 + si, vy * 3, vz * 3, 2), lichen = sstep(0.55, 0.75, fbm3(vx * 5 + 7, vy * 5, vz * 5 + si, 2)), shade = vy < -0.2 ? 0.75 : 1;
-      const gr = (0.38 + s * 0.2) * shade;   // warm tan-grey granite, darker in the joints underneath, orange lichen patches
-      col.push(lerp(gr * 1.04, 0.52, lichen * 0.4), lerp(gr * 0.96, 0.4, lichen * 0.4), lerp(gr * 0.83, 0.22, lichen * 0.4));
+      const gr = (0.29 + s * 0.16) * shade;   // warm tan-grey granite, darker in the joints underneath, orange lichen patches
+      col.push(lerp(gr * 1.08, 0.44, lichen * 0.4), lerp(gr * 0.95, 0.33, lichen * 0.4), lerp(gr * 0.64, 0.14, lichen * 0.4));
     }
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); parts.push(toNonIndexed(g));
   };
@@ -181,7 +188,12 @@ export function createBishopKnobs(detail = 1) {
     boulder(x, z, 3 + R() * R() * 8, 300 + placed); placed++;
   }
   const geo = mergeGeometries(parts); geo.computeVertexNormals();
-  const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })); m.frustumCulled = false; m.castShadow = false; m.name = 'bishop-rocks';
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+  mat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvWP = (modelMatrix * vec4(position, 1.0)).xyz;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vWP;').replace('#include <fog_fragment>', PEAK_FOG);
+  };
+  const m = new THREE.Mesh(geo, mat); m.frustumCulled = false; m.castShadow = false; m.name = 'bishop-rocks';
   m.userData.crest = crest.filter((_, i) => i % 4 === 0);
   return m;
 }
