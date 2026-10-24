@@ -239,7 +239,7 @@ function bough(parts, pts, r0, r1, col, seg) {
 // a lumpy foliage tuft: sunlit top, darker body, dark underside, AO toward the crown centre. Normals are pulled
 // toward the centre of the tuft's branch cluster and of the whole crown (nrm: [[x, y, z, weight], ...]) so the
 // canopy shades as one soft volume broken into clumps rather than a stack of flat pads.
-export function clump(c, rx, ry, rz, seed, pal, { detail = 1, flat = 0.8, droop = 0.7, ao = null, nrm = null, lift = 0.25, band = null } = {}) {
+export function clump(c, rx, ry, rz, seed, pal, { detail = 1, flat = 0.8, droop = 0.7, ao = null, aoMin = 0.4, nrm = null, lift = 0.25, band = null } = {}) {
   const g = posOnly(new THREE.IcosahedronGeometry(1, detail));
   const p = g.attributes.position, col = [];
   for (let i = 0; i < p.count; i++) {
@@ -257,7 +257,7 @@ export function clump(c, rx, ry, rz, seed, pal, { detail = 1, flat = 0.8, droop 
       r = w < 0.5 ? pal.under.map((u, j) => lerp(u, pal.mid[j], w * 2)) : pal.mid.map((m, j) => lerp(m, pal.top[j], w * 2 - 1));
     } else r = y > -0.25 ? pal.mid.map((m, j) => lerp(m, pal.top[j], Math.min(1, Math.max(0, top * 0.8 + (hl - 0.45) * 0.9)))) : pal.under;
     let a = 1;
-    if (ao) { const d = Math.hypot(X - ao[0], (Y - ao[1]) * 1.3, Z - ao[2]) / ao[3]; a = 0.4 + 0.6 * Math.min(1, Math.max(0, d)); }
+    if (ao) { const d = Math.hypot(X - ao[0], (Y - ao[1]) * 1.3, Z - ao[2]) / ao[3]; a = aoMin + (1 - aoMin) * Math.min(1, Math.max(0, d)); }
     col.push(r[0] * a, r[1] * a, r[2] * a);
   }
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
@@ -275,6 +275,8 @@ const PAL = {
   pine: { top: [0.11, 0.2, 0.075], mid: [0.05, 0.11, 0.05], under: [0.022, 0.045, 0.03] },
   euc: { top: [0.3, 0.41, 0.33], mid: [0.15, 0.235, 0.2], under: [0.08, 0.12, 0.11] },
   oak: { top: [0.12, 0.19, 0.06], mid: [0.055, 0.105, 0.04], under: [0.02, 0.04, 0.02] },
+  // the Bishop dome skirts to the ground, so its underside is in plain view: a lifted olive shade, not near-black
+  liveOak: { top: [0.12, 0.19, 0.06], mid: [0.06, 0.11, 0.042], under: [0.04, 0.068, 0.03] },
   cyp: { top: [0.1, 0.18, 0.08], mid: [0.045, 0.1, 0.05], under: [0.05, 0.07, 0.05] },
 };
 const pineBark = (x, y, z) => { const n = fbm3(x * 4, y * 0.7, z * 4, 2); return [0.19 + n * 0.08, 0.12 + n * 0.05, 0.085 + n * 0.03]; };
@@ -451,7 +453,7 @@ function oakDome(seed, far) {
   for (let i = 0; i < nt; i++) {
     const rr = Math.sqrt((i + 0.5) / nt), a = i * 2.39996 + R() * 0.4, r = rr * 6.6;
     const y = 7.4 - rr * rr * 4.6 + (R() - 0.5) * 0.6, s = (1.6 + (1 - rr) * 0.7 + R() * 0.5) * f;
-    parts.push(clump([top[0] + Math.cos(a) * r, y, Math.sin(a) * r * 0.92], s * 1.15, s * 0.95, s * 1.1, seed + i * 2.9, PAL.oak, { detail: far ? 0 : 1, flat: 0.55, droop: 0.5, ao, nrm: [cc] }));
+    parts.push(clump([top[0] + Math.cos(a) * r, y, Math.sin(a) * r * 0.92], s * 1.15, s * 0.95, s * 1.1, seed + i * 2.9, PAL.liveOak, { detail: far ? 0 : 1, flat: 0.55, droop: 0.5, ao, aoMin: 0.6, nrm: [cc] }));
   }
   return parts;
 }
