@@ -252,27 +252,37 @@ export function createCerroM(surfaceY = heightAt) {
 // steep pink roofs with irregular cross gables, pink trim, stone chimneys and a round turret at the south end, and the
 // long, low guest wing running off to the north. No interiors, no lettering.
 export function createMadonnaInn(surfaceY = heightAt) {
-  const parts = [], R = rng(41);
-  const STONE = [0.46, 0.42, 0.38], STONE2 = [0.6, 0.55, 0.48], WALL = [0.93, 0.9, 0.86], PINK = [0.92, 0.42, 0.56], PINK2 = [0.8, 0.33, 0.47], TRIM = [0.98, 0.56, 0.68], WIN = [0.12, 0.13, 0.17], GOLD = [0.78, 0.62, 0.3];
+  let parts = [];
+  const R = rng(41);
+  const STONE = [0.46, 0.42, 0.38], STONE2 = [0.6, 0.55, 0.48], WALL = [0.93, 0.9, 0.86], PINK = [0.92, 0.42, 0.56], PINK2 = [0.8, 0.33, 0.47], TRIM = [0.98, 0.56, 0.68], WIN = [0.12, 0.13, 0.17], GOLD = [0.78, 0.62, 0.3], LEAF = [0.2, 0.32, 0.12];
+  // the true place, the facade turned east-north-east toward US-101 as in life, drawn true size: it stands ~260 m behind the tee
+  const rot = faceBearing(70), rc = Math.cos(rot), rs = Math.sin(rot), y0 = surfaceY(LM.inn.x, LM.inn.z);
+  const toWorld = (x, z) => [LM.inn.x + x * rc + z * rs, LM.inn.z - x * rs + z * rc];
   const put = (g, col, jitter = 0) => {
     g = toNonIndexed(g); const p = g.attributes.position, c = [];
     for (let i = 0; i < p.count; i += 3) { const j = 1 + (R() - 0.5) * jitter; for (let q = 0; q < 3; q++) c.push(col[0] * j, col[1] * j, col[2] * j); }
     g.setAttribute('color', new THREE.Float32BufferAttribute(c, 3)); parts.push(g);
   };
   const box = (w, h, d, x, y, z, col, jit = 0) => put(new THREE.BoxGeometry(w, h, d).translate(x, y + h / 2, z), col, jit);
-  // rough boulder walls: a subdivided box whose faces bulge in and out stone by stone, each stone its own grey-brown
+  // every building part stands on its own ground: its floor at the highest terrain under its footprint, and its stone
+  // plinth carried down below the lowest (by `sink`), so nothing is buried on the uphill side or floats on the downhill one
+  let sink = 0;
+  // rough boulder walls: a subdivided box whose faces bulge in and out stone by stone, each stone its own grey-brown.
+  // Walls that start on the ground (y = 0) reach down by `sink`.
   const stoneWall = (w, h, d, x, y, z) => {
-    const g = new THREE.BoxGeometry(w, h, d, Math.max(1, Math.round(w / 2.2)), Math.max(1, Math.round(h / 1.4)), Math.max(1, Math.round(d / 2.2))), p = g.attributes.position;
+    const ext = y === 0 ? sink : 0; y -= ext; const hh = h + ext;
+    const g = new THREE.BoxGeometry(w, hh, d, Math.max(1, Math.round(w / 2.2)), Math.max(1, Math.round(h / 1.4)), Math.max(1, Math.round(d / 2.2))), p = g.attributes.position;
     for (let i = 0; i < p.count; i++) {
       const vx = p.getX(i), vy = p.getY(i), vz = p.getZ(i), n = fbm3(vx * 0.9 + x, vy * 0.9, vz * 0.9 + z, 2) - 0.5;
       p.setXYZ(i, vx * (1 + (Math.abs(vx) > w / 2 - 0.01 ? n * 0.06 : 0)), vy, vz * (1 + (Math.abs(vz) > d / 2 - 0.01 ? n * 0.08 : 0)));
     }
-    g.translate(x, y + h / 2, z); g.deleteAttribute('uv');
+    g.translate(x, y + hh / 2, z); g.deleteAttribute('uv');
     const ng = toNonIndexed(g), q = ng.attributes.position, c = [];
     for (let i = 0; i < q.count; i += 6) { const t = R(), col = t < 0.5 ? STONE : t < 0.8 ? STONE2 : [0.38, 0.34, 0.3], j = 0.85 + R() * 0.3; for (let k = 0; k < 6 && i + k < q.count; k++) c.push(col[0] * j, col[1] * j, col[2] * j); }
     ng.setAttribute('color', new THREE.Float32BufferAttribute(c, 3)); parts.push(ng);
   };
-  // a steep gable roof over a w x d footprint, ridge along x (alongX) or z, with pink bargeboards and a white gable end
+  // a steep gable roof over a w x d footprint, ridge along x (alongX) or z, with pink bargeboards and a white gable end.
+  // The bargeboards lie just under the rake and stop short of the eave so nothing pokes past the roof's edge.
   const gable = (w, d, h, x, y, z, alongX, col = PINK, over = 0.9) => {
     const hw = (alongX ? d : w) / 2 + over, hl = (alongX ? w : d) / 2 + over;
     const P = [[-hl, 0, -hw], [hl, 0, -hw], [hl, 0, hw], [-hl, 0, hw], [-hl, h, 0], [hl, h, 0]];
@@ -282,59 +292,140 @@ export function createMadonnaInn(surfaceY = heightAt) {
       const ex = s * (hl - over), g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(s > 0 ? [ex, 0, -hw + over, ex, 0, hw - over, ex, h * (1 - over / hw), 0] : [ex, 0, hw - over, ex, 0, -hw + over, ex, h * (1 - over / hw), 0], 3));
       g.computeVertexNormals(); if (!alongX) g.rotateY(Math.PI / 2); g.translate(x, y, z); put(g, WALL);
-      // bargeboards: two pink strips along the gable's rake
       for (const side of [-1, 1]) {
-        const len = Math.hypot(hw, h), bb = new THREE.BoxGeometry(0.5, 0.45, len).rotateX(side * Math.atan2(h, hw)).translate(s * (hl - 0.2), h / 2, side * hw / 2);
+        const len = Math.hypot(hw, h) - 0.6, t = Math.min(0.3, h * 0.08), a = Math.atan2(h, hw);
+        const bb = new THREE.BoxGeometry(0.4, t, len).rotateX(side * a).translate(s * (hl - 0.2), h / 2 - t * 0.6 * Math.cos(a), side * (hw / 2 - t * 0.6 * Math.sin(a)));
         if (!alongX) bb.rotateY(Math.PI / 2); bb.translate(x, y, z); put(bb, TRIM);
       }
     }
   };
-  const windows = (x0, x1, y, z, n, w = 1.3, h = 1.7) => { for (let i = 0; i < n; i++) { const x = lerp(x0, x1, (i + 0.5) / n); box(w, h, 0.25, x, y, z, WIN); box(w + 0.7, 0.3, 0.3, x, y + h, z, PINK2); } };
+  // windows facing +z (face = 1) or -z, each with a pink lintel, a pair of pink shutters and a flower box
+  const windows = (x0, x1, y, z, n, w = 1.3, h = 1.7, face = 1) => {
+    for (let i = 0; i < n; i++) {
+      const x = lerp(x0, x1, (i + 0.5) / n); box(w, h, 0.25, x, y, z, WIN); box(w + 0.7, 0.3, 0.3, x, y + h, z, PINK2);
+      for (const sx of [-1, 1]) box(0.45, h, 0.12, x + sx * (w / 2 + 0.25), y, z + face * 0.1, PINK);
+      box(w + 0.2, 0.35, 0.45, x, y - 0.4, z + face * 0.2, i % 2 ? LEAF : PINK2);
+    }
+  };
   const chimney = (x, z, y, h) => { stoneWall(2.2, h, 2.2, x, y, z); box(2.6, 0.5, 2.6, x, y + h, z, STONE2); };
+  // one building part: footprint [x0, x1] x [z0, z1] in the part's own frame, placed by (ox, oz, yaw) in the Inn's frame
+  const role = [];
+  const building = (x0, x1, z0, z1, build, ox = 0, oz = 0, yaw = 0) => {
+    const cy = Math.cos(yaw), sy = Math.sin(yaw); let hi = -1e9, lo = 1e9;
+    for (let x = x0; x <= x1 + 1e-6; x += Math.min(3, (x1 - x0) / Math.ceil((x1 - x0) / 3))) for (let z = z0; z <= z1 + 1e-6; z += Math.min(3, (z1 - z0) / Math.ceil((z1 - z0) / 3))) {
+      const [wx, wz] = toWorld(ox + x * cy + z * sy, oz - x * sy + z * cy), h = surfaceY(wx, wz); hi = Math.max(hi, h); lo = Math.min(lo, h);
+    }
+    const all = parts; parts = []; sink = hi - lo + 0.5; build();
+    for (const g of parts) {
+      const p = g.attributes.position;
+      for (let i = 0; i < p.count; i++) { const v = p.getY(i); role.push(v < -sink + 0.01 ? 0 : v < 1 ? 1 : 2); }
+      g.rotateY(yaw).translate(ox, hi - y0, oz); all.push(g);
+    }
+    parts = all;
+  };
   // main building: 62 m long, a storey of boulders under a white storey, ridge along x, facade toward +z
-  stoneWall(62, 4.2, 15, 0, 0, 0); box(61.4, 4.2, 14.4, 0, 4.2, 0, WALL, 0.03); box(62.6, 0.45, 15.6, 0, 4.1, 0, TRIM);
-  gable(61.4, 14.4, 9.5, 0, 8.4, 0, true);
-  windows(-27, 27, 5.4, 7.25, 14); windows(-27, 27, 5.4, -7.25, 14);
-  for (let i = 0; i < 8; i++) box(2.6, 2.4, 0.3, -24 + i * 6.8, 0.6, 7.6, WIN);
-  // irregular cross gables on the facade: different widths, heights and depths
-  for (const [x, w, d, hh, rh] of [[-21, 11, 8, 8.4, 9], [-3, 14, 10, 9.6, 10.5], [17, 9, 7, 8.4, 8.2]]) {
-    stoneWall(w, 4.2, d, x, 0, 7.5 + d / 2 - 1); box(w - 0.5, hh - 4.2, d - 0.5, x, 4.2, 7.5 + d / 2 - 1, WALL, 0.03);
-    gable(w - 0.5, d - 0.5, rh, x, hh, 7.5 + d / 2 - 1, false, x === -3 ? PINK : PINK2);
-    windows(x - w / 2 + 2, x + w / 2 - 2, 5.6, 7.5 + d - 0.7, 2, 1.4, 2.0); box(2.4, 3.2, 0.3, x, 0.3, 7.5 + d - 0.75, GOLD);
-  }
-  // a dormer pair on the back slope, chimneys of the same rough stone
-  for (const x of [-12, 8]) { box(4, 2.6, 3, x, 9.2, -3.6, WALL); gable(4, 3, 2.4, x, 11.8, -3.6, false, PINK2, 0.4); }
-  chimney(-14, -1.5, 8.4, 9.5); chimney(6, 1.5, 8.4, 10.5); chimney(25, -2, 8.4, 8.5);
-  // the round turret at the south (-x) end: boulder drum, white upper, tall pink cone
-  { const tx = -34, tz = 6, r = 4.2;
-    put(new THREE.CylinderGeometry(r * 1.06, r * 1.12, 5, 14, 3).translate(tx, 2.5, tz), STONE, 0.3);
+  building(-32.5, 32.5, -9, 18, () => {
+    stoneWall(62, 4.2, 15, 0, 0, 0); box(61.4, 4.2, 14.4, 0, 4.2, 0, WALL, 0.03); box(62.6, 0.45, 15.6, 0, 4.1, 0, TRIM); box(62, 0.35, 14.8, 0, 8.05, 0, TRIM);
+    gable(61.4, 14.4, 9.5, 0, 8.4, 0, true);
+    windows(-27, 27, 5.4, 7.25, 14); windows(-27, 27, 5.4, -7.25, 14, 1.3, 1.7, -1);
+    for (let i = 0; i < 8; i++) box(2.6, 2.4, 0.3, -24 + i * 6.8, 0.6, 7.6, WIN);
+    // irregular cross gables on the facade; each runs back into the main attic so its back end is hidden under the roof
+    for (const [x, w, d, hh, rh] of [[-21, 11, 8, 8.4, 8.2], [-3, 14, 10, 9.6, 7.8], [17, 9, 7, 8.4, 7.6]]) {
+      const zf = 7.5 + d - 1, zb = 0.5, zc = (zf + zb) / 2;
+      stoneWall(w, 4.2, d, x, 0, 7.5 + d / 2 - 1); box(w - 0.5, hh - 4.2, zf - zb - 0.25, x, 4.2, zc - 0.12, WALL, 0.03);
+      gable(w - 0.5, zf - zb - 0.25, rh, x, hh, zc - 0.12, false, x === -3 ? PINK : PINK2);
+      windows(x - w / 2 + 2, x + w / 2 - 2, 5.6, zf - 0.32, 2, 1.4, 2.0); box(2.4, 3.2, 0.3, x, 0.3, zf - 0.37, GOLD);
+    }
+    // a dormer pair on the back slope: the front sits inside the eave, the walls start inside the roof
+    for (const x of [-12, 8]) { box(4, 2.8, 3.2, x, 9.8, -4.6, WALL); box(1.4, 1.5, 0.25, x, 10.6, -6.2, WIN); gable(4, 3.2, 2.0, x, 12.6, -4.6, false, PINK, 0.3); }
+    chimney(-14, -1.5, 8.4, 9.5); chimney(6, 1.5, 8.4, 10.5); chimney(25, -2, 8.4, 8.5);
+  });
+  // the round turret at the south (-x) end and the end gable over the south end, a step down
+  building(-44, -28, -13, 12, () => {
+    const tx = -34, tz = 6, r = 4.2;
+    put(new THREE.CylinderGeometry(r * 1.06, r * 1.12, 5 + sink, 14, 3).translate(tx, 2.5 - sink / 2, tz), STONE, 0.3);
     put(new THREE.CylinderGeometry(r, r, 9, 14).translate(tx, 9.5, tz), WALL, 0.03);
     put(new THREE.CylinderGeometry(r * 1.08, r * 1.08, 0.6, 14).translate(tx, 14.2, tz), TRIM);
     put(new THREE.ConeGeometry(r * 1.35, 11, 14).translate(tx, 14.5 + 5.5, tz), PINK, 0.06);
-    for (let i = 0; i < 5; i++) { const a = i * 1.26 + 0.3; box(1.0, 1.7, 0.3, tx + Math.cos(a) * r, 9.5, tz + Math.sin(a) * r, WIN); } }
-  // the end gable over the south end, a step down
-  stoneWall(12, 4, 16, -37, 0, -4); box(11.5, 3.4, 15.5, -37, 4, -4, WALL); gable(11.5, 15.5, 7, -37, 7.4, -4, false, PINK2);
-  // the long, low guest wing to the north (+x), slightly kinked, with little dormers
-  for (const [x, z, len, yaw] of [[64, -3, 38, -0.08], [100, -9, 34, -0.2]]) {
-    const wing = []; const keep = parts.length;
-    stoneWall(len, 1.8, 10, 0, 0, 0); box(len - 0.4, 2.6, 9.6, 0, 1.8, 0, WALL, 0.03); box(len, 0.35, 10.3, 0, 4.3, 0, TRIM);
-    gable(len - 0.4, 9.6, 4.6, 0, 4.4, 0, true, PINK2, 0.8);
+    for (let i = 0; i < 5; i++) { const a = i * 1.26 + 0.3; box(1.0, 1.7, 0.3, tx + Math.cos(a) * r, 9.5, tz + Math.sin(a) * r, WIN); }
+    stoneWall(12, 4, 16, -37, 0, -4); box(11.5, 3.4, 15.5, -37, 4, -4, WALL); box(12, 0.35, 16, -37, 7.1, -4, TRIM); gable(11.5, 15.5, 7, -37, 7.4, -4, false, PINK);
+  });
+  // the long, low guest wings to the north (+x), slightly kinked, each with dormers and a pair of cross gables
+  for (const [x, z, len, yaw] of [[64, -3, 38, -0.08], [100, -9, 34, -0.2]]) building(-len / 2 - 1, len / 2 + 1, -6, 7, () => {
+    stoneWall(len, 1.8, 10, 0, 0, 0); box(len - 0.4, 2.6, 9.6, 0, 1.8, 0, WALL, 0.03); box(len, 0.35, 10.3, 0, 4.3, 0, TRIM); box(len, 0.3, 10.2, 0, 1.75, 0, PINK2);
+    gable(len - 0.4, 9.6, 4.6, 0, 4.4, 0, true, PINK, 0.8);
+    const xs = [-len / 4, len / 4];
     windows(-len / 2 + 2, len / 2 - 2, 2.1, 4.85, Math.round(len / 4.5), 1.2, 1.4);
-    for (let i = 0; i < Math.floor(len / 10); i++) { const dx = -len / 2 + 6 + i * 10; box(2.6, 2, 2, dx, 6.0, 3.2, WALL); gable(2.6, 2, 1.8, dx, 8, 3.2, false, PINK, 0.3); }
-    for (let i = keep; i < parts.length; i++) wing.push(parts[i]);
-    for (const g of wing) g.rotateY(yaw).translate(x, 0, z);
-  }
+    // cross gables stepping 1.4 m out of the facade, their ridges under the wing's
+    for (const cx of xs) { stoneWall(6, 1.8, 6.2, cx, 0, 3.1); box(5.6, 2.6, 5.8, cx, 1.8, 3.2, WALL, 0.03); gable(5.6, 5.8, 3.4, cx, 4.4, 3.2, false, PINK2, 0.5); box(1.4, 1.6, 0.25, cx, 2.2, 6.15, WIN); }
+    // dormers sit on the front slope between the cross gables: their fronts inside the eave, their walls rising out of the roof
+    for (let i = 0; i < Math.floor(len / 10); i++) {
+      const dx = -len / 2 + 6 + i * 10; if (xs.some((cx) => Math.abs(cx - dx) < 5)) continue;
+      box(2.4, 2.0, 3.7, dx, 5.6, 1.85, WALL); box(1.0, 1.0, 0.2, dx, 6.0, 3.7, WIN); gable(2.4, 3.7, 1.2, dx, 7.6, 1.85, false, PINK, 0.25);
+    }
+  }, x, z, yaw);
   // terrace wall and planters along the front
-  stoneWall(52, 1.0, 1.2, -2, 0, 20);
-  for (let i = 0; i < 6; i++) put(new THREE.IcosahedronGeometry(1.4, 0).scale(1, 0.8, 1).translate(-24 + i * 9.5, 1.6, 20.5), [0.16, 0.24, 0.09], 0.2);
+  building(-29, 25, 18.5, 22, () => {
+    stoneWall(52, 1.0, 1.2, -2, 0, 20);
+    for (let i = 0; i < 6; i++) put(new THREE.IcosahedronGeometry(1.4, 0).scale(1, 0.8, 1).translate(-24 + i * 9.5, 1.6, 20.5), [0.16, 0.24, 0.09], 0.2);
+  });
   const geo = mergeGeometries(parts); geo.computeVertexNormals();
   const m = new THREE.Mesh(geo, selfLit(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide }), 0.22));
-  // the true place, the facade turned east-north-east toward US-101 as in life, drawn true size: it stands ~260 m behind the tee
-  const S = 1.0; m.rotation.y = faceBearing(70); m.scale.setScalar(S);
-  let lo = 1e9; for (const [dx, dz] of [[-40, -10], [40, -10], [-40, 20], [40, 20], [0, 0], [100, -10]]) { const c = Math.cos(m.rotation.y), s = Math.sin(m.rotation.y); lo = Math.min(lo, surfaceY(LM.inn.x + (dx * c + dz * s) * S, LM.inn.z + (-dx * s + dz * c) * S)); }
-  m.position.set(LM.inn.x, lo - 0.6, LM.inn.z);
-  m.frustumCulled = false; m.name = 'madonna-inn'; m.userData.size = 140 * S;
+  m.rotation.y = rot; m.position.set(LM.inn.x, y0, LM.inn.z);
+  m.frustumCulled = false; m.name = 'madonna-inn'; m.userData.size = 140; m.userData.role = Uint8Array.from(role);
   return m;
+}
+
+// ---------- the Madonna Inn roadside sign: a stone pier, two dark posts and the pink "Madonna Inn" script panel ----------
+// Real spot: the grounds' east edge by the entrance drive off Madonna Road, 35.26680, -120.67380 (west of US-101). Seen
+// from the real pan-start camera (ball on the tee, ~30 m up) that spot is in frame and unblocked, but it sits so far left
+// of the Inn that the auto-framed shot has to widen to fov 100 and the panel drops to ~6 px. So the sign is moved the
+// minimum that keeps the panel >= 12 px at pan start: 157 m along the grounds' edge (120 m north up the US-101 frontage,
+// then 37 m west along the north-east boundary; 126 m in a straight line), to 35.26788, -120.67421. The panel is drawn
+// oversize (12 m) so the script reads at ~400 m.
+const SIGN_LL = { lat: 35.26788, lon: -120.67421 };
+export function createInnSign(surfaceY = heightAt, face = TEE) {
+  const { x, z } = llToWorld(SIGN_LL.lat, SIGN_LL.lon), R = rng(77);
+  const yaw = Math.atan2(face.x - x, face.z - z);   // the panel's +z normal points at `face` (the pan-start camera / tee)
+  let lo = 1e9, hi = -1e9;
+  for (const dx of [-5, 0, 5]) for (const dz of [-1.5, 0, 1.5]) { const h = surfaceY(x + dx * Math.cos(yaw) + dz * Math.sin(yaw), z - dx * Math.sin(yaw) + dz * Math.cos(yaw)); lo = Math.min(lo, h); hi = Math.max(hi, h); }
+  const sink = hi - lo + 0.4, parts = [];
+  const STONE = [0.46, 0.42, 0.38], STONE2 = [0.6, 0.55, 0.48], POST = [0.16, 0.13, 0.12], PINK = [0.92, 0.42, 0.56], GOLD = [0.78, 0.62, 0.3];
+  const put = (g, col, jit = 0) => {
+    g = toNonIndexed(g); const p = g.attributes.position, c = [];
+    for (let i = 0; i < p.count; i += 3) { const t = typeof col === 'function' ? col() : col, j = 1 + (R() - 0.5) * jit; for (let q = 0; q < 3; q++) c.push(t[0] * j, t[1] * j, t[2] * j); }
+    g.setAttribute('color', new THREE.Float32BufferAttribute(c, 3)); parts.push(g);
+  };
+  const box = (w, h, d, bx, by, bz, col, jit) => put(new THREE.BoxGeometry(w, h, d).translate(bx, by + h / 2, bz), col, jit);
+  // rough stone pier, carried down below the lowest ground under it
+  const pier = new THREE.BoxGeometry(9, 2.4 + sink, 2.4, 5, 2, 1), pp = pier.attributes.position;
+  for (let i = 0; i < pp.count; i++) pp.setXYZ(i, pp.getX(i) * (1 + (R() - 0.5) * 0.04), pp.getY(i), pp.getZ(i) * (1 + (R() - 0.5) * 0.12));
+  put(pier.translate(0, (2.4 + sink) / 2 - sink, 0), () => (R() < 0.6 ? STONE : STONE2), 0.25);
+  box(9.4, 0.3, 2.7, 0, 2.4, 0, STONE2, 0.1);
+  for (const sx of [-4, 4]) box(0.5, 6.9, 0.5, sx, 2.7, 0, POST);
+  // the panel frame: pink border with a gold inner bead, front and back, and a gold crest on top
+  box(12.8, 0.45, 0.5, 0, 4.6, 0, PINK); box(12.8, 0.45, 0.5, 0, 9.2, 0, PINK);
+  for (const sx of [-6.2, 6.2]) box(0.4, 4.2, 0.5, sx, 5.0, 0, PINK);
+  for (const sz of [-0.27, 0.27]) { box(12.0, 0.12, 0.05, 0, 5.06, sz, GOLD); box(12.0, 0.12, 0.05, 0, 9.08, sz, GOLD); }
+  put(new THREE.ConeGeometry(0.9, 0.9, 4).rotateY(Math.PI / 4).translate(0, 10.1, 0), GOLD);
+  const geo = mergeGeometries(parts); geo.computeVertexNormals();
+  const frame = new THREE.Mesh(geo, selfLit(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }), 0.22));
+  // the script, condensed to 66% width like the tall sign lettering: one canvas on a front and a back plane (the back's u
+  // flipped so it reads from both sides)
+  const PW = 12, PH = 4.2, PY = 7.1, cv = document.createElement('canvas'); cv.width = 1024; cv.height = Math.round(1024 * PH / PW); const cx = cv.getContext('2d');
+  const FONT = (px) => `italic 700 ${px}px "Brush Script MT", "Segoe Script", cursive, serif`, SQ = 0.66;
+  cx.fillStyle = '#FBF6EE'; cx.fillRect(0, 0, cv.width, cv.height);
+  cx.font = FONT(100); const fs = Math.floor(100 * 0.94 * cv.width / (cx.measureText('Madonna Inn').width * SQ)); cx.font = FONT(fs);
+  cx.textAlign = 'center'; cx.textBaseline = 'alphabetic'; cx.lineJoin = 'round'; cx.lineWidth = fs * 0.06;
+  cx.save(); cx.translate(cv.width / 2, cv.height / 2 + fs * 0.33); cx.scale(SQ, 1);
+  cx.strokeStyle = '#8E1F48'; cx.strokeText('Madonna Inn', 0, 0); cx.fillStyle = '#E0457B'; cx.fillText('Madonna Inn', 0, 0); cx.restore();
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  const front = new THREE.PlaneGeometry(PW, PH).translate(0, PY, 0.26), back = new THREE.PlaneGeometry(PW, PH).rotateY(Math.PI).translate(0, PY, -0.26);
+  const bu = back.attributes.uv; for (let i = 0; i < bu.count; i++) bu.setX(i, 1 - bu.getX(i));
+  const panel = new THREE.Mesh(mergeGeometries([front, back]), selfLit(new THREE.MeshLambertMaterial({ map: tex }), 0.35));
+  const g = new THREE.Group(); g.add(frame, panel); g.position.set(x, hi, z); g.rotation.y = yaw; g.scale.setScalar(1.3);   // 1.3x so the panel stays >= 12 px in the wide Inn shot g.name = 'madonna-inn-sign';
+  g.userData.panel = { w: PW, h: PH, y: PY, cap: fs * 0.65 / cv.height * PH, sink };
+  return g;
 }
 
 // ---------- scatter: dry golden grass, chaparral and sage scrub, granite boulders ----------
@@ -380,7 +471,7 @@ export function createDryGrass(count, fringe = 0) {
   return mesh;
 }
 
-export function createChaparral(count) {
+export function createChaparral(count, surfaceY = heightAt) {
   const parts = [], pal = { top: [1.0, 1.0, 1.0], mid: [0.72, 0.72, 0.72], under: [0.38, 0.38, 0.38] };
   [[0, 0.42, 0, 0.5, 0.45, 0.5], [0.5, 0.3, 0.2, 0.42, 0.36, 0.4], [-0.45, 0.28, -0.25, 0.45, 0.34, 0.42], [0.1, 0.26, -0.55, 0.38, 0.3, 0.36], [-0.2, 0.25, 0.5, 0.4, 0.3, 0.38], [0.35, 0.55, -0.15, 0.32, 0.3, 0.3]]
     .forEach(([x, y, z, a, b, c], i) => parts.push(clump([x, y, z], a, b, c, i * 4.1 + 2, pal, { detail: 0, flat: 0.85, droop: 0.6, ao: [0, 0.2, 0, 1.0], nrm: [[0, 0.05, 0, 0.9]] })));
@@ -391,6 +482,7 @@ export function createChaparral(count) {
     const surf = surfaceAt(x, z); if (surf === 'water' || surf === 'green' || surf === 'sand' || pondDist(x, z) < 4 || sightK(x, z) > 0.5 && R() < 0.8) return null;
     const hgt = heightAt(x, z), patch = fbm(x * 0.03 + 11, z * 0.03 - 4), rise = hgt - baseY(x, z);
     if (patch < 0.5 + (rise < 2 ? 0.12 : 0) || np < 11) return null;     // clumps on the rises and in the rough, not the valley floor
+    if ((np < 60 || innView(x, z, -480, 30)) && slopeAt(x, z, surfaceY) < 0.14) return null;   // keep the flat pasture in the pan-start view and by play clear (they read as rocks); hillsides keep theirs
     p.set(x, hgt - 0.15, z); q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, R() * 6.28);
     const sc = 0.8 + R() * 1.0; s.set(sc * (1 + R() * 0.4), sc * (0.7 + R() * 0.4), sc * (1 + R() * 0.4));
     const k = 0.85 + R() * 0.3, w = R();
@@ -401,6 +493,14 @@ export function createChaparral(count) {
   });
 }
 
+// the open pasture between the tee and the Inn: a 25-degree cone from the tee to the middle of the complex, out past it
+const INN_MID = (() => { const a = faceBearing(70); return { x: LM.inn.x + 36 * Math.cos(a) + 3 * Math.sin(a), z: LM.inn.z - 36 * Math.sin(a) + 3 * Math.cos(a) }; })();
+// `far` / `half` widen it to the whole pan-start frame (the camera sits ~11 m past the tee with a ~23-degree half width)
+function innView(x, z, far = 40, half = 25) {
+  const ix = INN_MID.x - TEE.x, iz = INN_MID.z - TEE.z, l = Math.hypot(ix, iz), vx = x - TEE.x, vz = z - TEE.z, d = Math.hypot(vx, vz);
+  return d < (far > 0 ? l + far : -far) && (vx * ix + vz * iz) / (d * l + 1e-9) > Math.cos(half * RAD);
+}
+const slopeAt = (x, z, h = heightAt) => Math.hypot(h(x + 2, z) - h(x - 2, z), h(x, z + 2) - h(x, z - 2)) / 4;   // rise over run of the drawn ground
 export function createGranite(count) {
   const geo = posOnly(new THREE.DodecahedronGeometry(1, 1));
   const p = geo.attributes.position; for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i), z = p.getZ(i), k = 0.7 + fbm3(x * 1.3 + 4, y * 1.3, z * 1.3, 2) * 0.6; p.setXYZ(i, x * k, y * k * 0.7, z * k); }
@@ -408,8 +508,8 @@ export function createGranite(count) {
   const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }), count);
   const rand = rng(51);
   return scatter(mesh, count, rand, (R, pp, q, s, c, e) => {
-    const [x, z] = inRegion(R), np = nearPlay(x, z); if (np < 4) return null;
-    const surf = surfaceAt(x, z); if (surf === 'water' || surf === 'sand' || pondDist(x, z) < 2 || sightK(x, z) > 0.6) return null;
+    const [x, z] = inRegion(R), np = nearPlay(x, z); if (np < 60) return null;     // none near the tee or the fairway
+    const surf = surfaceAt(x, z); if (surf === 'water' || surf === 'sand' || pondDist(x, z) < 2 || sightK(x, z) > 0.6 || innView(x, z)) return null;
     const hgt = heightAt(x, z);
     if (fbm(x * 0.04, z * 0.04 + 3) < 0.55 && R() > 0.12) return null;
     pp.set(x, hgt - 0.1, z); e.set(R() * 0.5, R() * 6.28, R() * 0.5); q.setFromEuler(e);

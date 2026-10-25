@@ -11,8 +11,8 @@ export const MAPS = {
   },
   bishop: {
     id: 'bishop', name: 'Bishop Peak', course: bishop, place: 'San Luis Obispo', lat: bishop.SITE.lat, lon: bishop.SITE.lon, weatherLat: bishop.SITE.lat, weatherLon: bishop.SITE.lon,
-    blurb: 'Par 5 in the valley below Bishop Peak, with Cerro San Luis and the Madonna Inn across the way.', short: 'Par 5 · valley', fogScale: 0.3,
-    cap: 'dogleg right toward Bishop Peak', loaderSub: 'Par 5 in the San Luis Obispo valley, played under live San Luis Obispo weather.',
+    blurb: 'Par 4 in the valley below Bishop Peak, with Cerro San Luis and the Madonna Inn across the way.', short: 'Par 4 · valley', fogScale: 0.3,
+    cap: 'dogleg right toward Bishop Peak', loaderSub: 'Par 4 in the San Luis Obispo valley, played under live San Luis Obispo weather.',
   },
 };
 export const MAP_KEYS = Object.keys(MAPS);

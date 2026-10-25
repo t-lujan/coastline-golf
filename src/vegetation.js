@@ -739,7 +739,7 @@ export function lodScatter(mesh) {
   const n = mesh.userData.max, src = mesh.instanceMatrix.array.slice(0, n * 16), col = mesh.instanceColor ? mesh.instanceColor.array.slice(0, n * 3) : null;
   const R = rng(n * 7 + 3), keep = new Float32Array(n);
   for (let i = 0; i < n; i++) keep[i] = i < (mesh.userData.always || 0) ? 0 : R();   // a stable per-instance threshold: the same tufts stay as density drops
-  const dst = mesh.instanceMatrix.array, dcol = col && mesh.instanceColor.array;
+  const dst = mesh.instanceMatrix.array, dcol = col && mesh.instanceColor.array; mesh.userData.src = src;
   mesh.userData.lod = (cx, cz, fx, fz, frac, near, far) => {
     let c = 0;
     const span = Math.max(1, far - near);

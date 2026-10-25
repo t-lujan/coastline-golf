@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { TEE, CUP, GREEN, PAR, HOLE_M, HOLE_YD, ROCK, STACKS, BOUNDS, HEADING, MAP_ID, WATER_LEVEL, BUNKERS, heightAt, surfaceAt, greenDist, normalAt, fairwayDist } from './course.js';
 import { MAP, MAPS, rememberMap } from './maps/index.js';
 import * as bishop from './maps/bishop.js';
-import { landColor, createBackdrop, createBishopKnobs, createCerroM, createMadonnaInn, createDryGrass, createChaparral, createGranite, createFarOaks } from './bishop-scene.js';
+import { landColor, createBackdrop, createBishopKnobs, createCerroM, createMadonnaInn, createInnSign, createDryGrass, createChaparral, createGranite, createFarOaks } from './bishop-scene.js';
 import { sunPosition, sceneDate, laClock, lookFor } from './sun.js';
 import { getWeather, compass, windVector } from './weather.js';
 import { createSky } from './sky.js';
@@ -123,7 +123,7 @@ async function build() {
   if (BISHOP) {
     const knobs = createBishopKnobs(qLevel === 'high' && !touch ? 2 : 1); W0.crest = knobs.userData.crest; W0.rock = knobs; scene.add(knobs);
     const sy = W0.backdrop.userData.surfaceY;
-    W0.cerroM = createCerroM(sy); scene.add(W0.cerroM); W0.inn = createMadonnaInn(sy); scene.add(W0.inn);
+    W0.cerroM = createCerroM(sy); scene.add(W0.cerroM); W0.inn = createMadonnaInn(sy); scene.add(W0.inn); W0.innSign = createInnSign(sy); scene.add(W0.innSign);
     W0.boats = inert(); W0.mist = { group: new THREE.Group(), uniforms: { uCol: { value: new THREE.Color() }, uAmt: { value: 0 }, uTime: { value: 0 } } };
     W0.wisps = { points: new THREE.Group(), uniforms: { uCol: { value: new THREE.Color() }, uWind: { value: new THREE.Vector2() }, uTime: { value: 0 }, uScale: { value: 0 } } };
     W0.bmat = { color: new THREE.Color() };
@@ -147,7 +147,7 @@ async function build() {
   // scatter is thinned by distance from the camera every few metres it moves (see updateLod); reach: how far each kind
   // carries relative to the tier's near/far distances (bigger plants stay visible further out)
   if (BISHOP) {
-    W0.scatter = { grass: createDryGrass(touch ? 9000 : 20000, touch ? 650 : 1000), rocks: createGranite(touch ? 240 : 420), shrubs: createChaparral(touch ? 700 : 1100) };
+    W0.scatter = { grass: createDryGrass(touch ? 9000 : 20000, touch ? 650 : 1000), rocks: createGranite(touch ? 240 : 420), shrubs: createChaparral(touch ? 700 : 1100, W0.backdrop.userData.surfaceY) };
     W0.reach = { grass: 1, rocks: 1.8, shrubs: 1.8 };
   } else {
     W0.scatter = { grass: createGrass(touch ? 9000 : 20000, touch ? 650 : 1000), flowers: createFlowers(touch ? 2600 : 5000), ice: createIcePlant(touch ? 1400 : 2600), rocks: createBeachRocks(touch ? 260 : 420), drift: createDriftwood(40), shrubs: createShrubs(touch ? 700 : 1100) };
@@ -571,33 +571,89 @@ function buildFlyover() {
   ].map(([t, ...r]) => [t * k, ...r]);
   fly.path = keyPath(keys); fly.dur = keys[keys.length - 1][0];
 }
-// the opening pan on Bishop Peak: from the tee camera, turned round onto the Madonna Inn behind the tee (zoomed in so it
-// reads large), the view sweeps right (the shorter way) round to Cerro San Luis and its M with Bishop Peak beside it, holds
-// a beat and settles on the tee aim view. Only the heading turns (pitch stays that of the tee camera), each leg eased in
-// and out, so there is no pitch wobble and the last frame is exactly aimPose()
-const pan = { t: 0, dur: 4.8, legs: null, pos: null, R: 1, pitch: 0, lift: 16, fov0: 36, zoomEnd: 2.6 };
+// the opening pan on Bishop Peak: from ~30 m above the tee, turned round onto the Madonna Inn behind the tee and framed so
+// the whole complex and its roadside sign fill most of the frame width, it holds a beat, then the view sweeps right (the
+// shorter way) round to Cerro San Luis and its M with Bishop Peak beside it, holds and settles on the tee aim view. Heading,
+// pitch, height and lens each ease one way per leg (quintic ends), so there is no wobble and the last frame is exactly aimPose()
+const pan = { t: 0, dur: 5.6, legs: null, pos: null, R: 1, pitch: 0, pitch0: 0, lift: 0, fov0: 36, hold: 0.8, turnEnd: 2.8, up: 30, fill: 0.75, fovM: 48, pitchM: 0, mPx: 36 };
 const hdg = (x, z) => Math.atan2(x, -z), wrapA = (a) => Math.atan2(Math.sin(a), Math.cos(a));
-function buildPan() {
-  const a = aimPose('driver', G.yaw), v = a.look.clone().sub(a.pos), LM = bishop.LM;
-  pan.pos = a.pos; pan.R = v.length(); pan.pitch = Math.asin(v.y / pan.R);
-  const h2 = hdg(v.x, v.z), at = (o) => h2 + wrapA(hdg(o.x - a.pos.x, o.z - a.pos.z) - h2);
-  const h0 = at(innMid()), h1 = (at(LM.cerro) + at(LM.m)) / 2;
-  pan.legs = [[0, 0.6, h0, h0], [0.6, 2.6, h0, h1], [2.6, 3.1, h1, h1], [3.1, pan.dur, h1, h2]];
+const panEase = (u) => { u = Math.max(0, Math.min(1, u)); return u * u * u * (u * (u * 6 - 15) + 10); };
+// the 8 world-space bbox corners of the Inn and of its sign: the pan-start shot is solved to hold them all
+function innCorners() {
+  const out = [], box = new THREE.Box3();
+  for (const o of [W0.inn, W0.innSign]) {
+    if (!o) continue; o.updateMatrixWorld(true); box.setFromObject(o, true);
+    for (let i = 0; i < 8; i++) out.push(new V3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z));
+  }
+  return out;
 }
-// the lens: narrow on the Inn, easing out to the normal field of view by the time the sweep reaches Cerro San Luis
-function panFov(t) { const u = Math.max(0, Math.min(1, t / pan.zoomEnd)), s = u * u * u * (u * (u * 6 - 15) + 10); return pan.fov0 + (baseFov - pan.fov0) * s; }
+const solveCam = new THREE.PerspectiveCamera();
+function buildPan() {
+  // on the club the tee aim view will open with (endPan lands on aimPose() with it), so the last frame is that view exactly
+  const a = aimPose(autoClub(), G.yaw), v = a.look.clone().sub(a.pos), LM = bishop.LM;
+  pan.pos = a.pos; pan.R = v.length(); pan.pitch = Math.asin(v.y / pan.R);
+  pan.lift = Math.max(0, heightAt(a.pos.x, a.pos.z) + pan.up - a.pos.y);
+  const h2 = hdg(v.x, v.z), at = (o) => h2 + wrapA(hdg(o.x - a.pos.x, o.z - a.pos.z) - h2);
+  const h1 = (at(LM.cerro) + at(LM.m)) / 2;
+  // start pose: aim at the middle of the Inn + sign and pick the lens so they span pan.fill of the frame width, centred a
+  // little below the middle of the frame (the HUD title sits up top); a few fixed-point steps converge to well under a pixel
+  const P0 = a.pos.clone().setY(a.pos.y + pan.lift), C = innCorners(), m = innMid();
+  let h0 = at(m), p0 = Math.atan2(m.y - P0.y, Math.hypot(m.x - P0.x, m.z - P0.z)), f = pan.fov0;
+  if (C.length) {
+    const sc = solveCam, q = new V3(); sc.aspect = camera.aspect; sc.near = 1; sc.far = 1e5; sc.position.copy(P0);
+    for (let k = 0; k < 12; k++) {
+      sc.fov = f; sc.updateProjectionMatrix();
+      sc.lookAt(P0.x + Math.sin(h0) * Math.cos(p0), P0.y + Math.sin(p0), P0.z - Math.cos(h0) * Math.cos(p0)); sc.updateMatrixWorld(true);
+      let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+      for (const c of C) { q.copy(c).project(sc); x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
+      const tv = Math.tan(f * Math.PI / 360), th = tv * sc.aspect;
+      h0 += Math.atan((x0 + x1) / 2 * th); p0 += Math.atan(((y0 + y1) / 2 + 0.1) * tv);
+      f = 2 * Math.atan(tv * (x1 - x0) / 2 / pan.fill) * 180 / Math.PI;
+    }
+  }
+  pan.fov0 = f; pan.pitch0 = p0;
+  const H = pan.hold, T = pan.turnEnd;
+  // the Cerro hold: aimed square on the M and the lens tightened until its drawn height is pan.mPx on screen (from the
+  // camera height at the middle of the hold)
+  let hm = h1, pm = pan.pitch, fm = baseFov;
+  if (W0.cerroM) {
+    const PM = a.pos.clone().setY(a.pos.y + pan.lift * (1 - panEase((T + 0.25 - H) / (pan.dur - H)))), box = new THREE.Box3().setFromObject(W0.cerroM, true);
+    // its actual vertices (the M lies on a slope, so its axis-aligned box corners overstate the drawn size)
+    const MC = [], q = new V3(), sc = solveCam, mp = W0.cerroM.geometry.attributes.position; W0.cerroM.updateMatrixWorld(true);
+    for (let i = 0; i < mp.count; i++) MC.push(new V3().fromBufferAttribute(mp, i).applyMatrix4(W0.cerroM.matrixWorld));
+    const mc = box.getCenter(new V3()); hm = at(mc); pm = Math.atan2(mc.y - PM.y, Math.hypot(mc.x - PM.x, mc.z - PM.z));
+    sc.aspect = camera.aspect; sc.near = 1; sc.far = 1e5; sc.position.copy(PM);
+    for (let k = 0; k < 8; k++) {
+      sc.fov = fm; sc.updateProjectionMatrix();
+      sc.lookAt(PM.x + Math.sin(hm) * Math.cos(pm), PM.y + Math.sin(pm), PM.z - Math.cos(hm) * Math.cos(pm)); sc.updateMatrixWorld(true);
+      let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+      for (const c of MC) { q.copy(c).project(sc); x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
+      const tv = Math.tan(fm * Math.PI / 360), th = tv * sc.aspect;
+      hm += Math.atan((x0 + x1) / 2 * th); pm += Math.atan((y0 + y1) / 2 * tv);
+      fm = Math.min(baseFov, 2 * Math.atan(tv * (y1 - y0) / 2 * H0px() / pan.mPx) * 180 / Math.PI);
+    }
+  }
+  pan.fovM = fm; pan.pitchM = pm;
+  pan.legs = [[0, H, h0, h0], [H, T, h0, hm], [T, T + 0.5, hm, hm], [T + 0.5, pan.dur, hm, h2]];
+}
+const H0px = () => (renderer && renderer.domElement.clientHeight) || innerHeight;
+// the lens and the pitch: framed on the Inn, easing onto the M at Cerro San Luis by the end of the sweep, then to the tee camera's
+// (start -> Cerro hold value over the sweep, held, then -> the tee camera's over the settle)
+function panLeg(t, v0, vm, v1) { const T = pan.turnEnd; return t <= T ? v0 + (vm - v0) * panEase((t - pan.hold) / (T - pan.hold)) : vm + (v1 - vm) * panEase((t - T - 0.5) / (pan.dur - T - 0.5)); }
+function panFov(t) { return panLeg(t, pan.fov0, pan.fovM, baseFov); }
+function panPitch(t) { return panLeg(t, pan.pitch0, pan.pitchM, pan.pitch); }
 function setFov(f) { if (Math.abs(camera.fov - f) > 1e-4) { camera.fov = f; camera.updateProjectionMatrix(); } }
 function applyPan(t) { camera.position.copy(panPos(t)); cam.look.set(...panLook(t)); camera.lookAt(cam.look); setFov(panFov(t)); }
 // the middle of the Inn complex as drawn (its wings spread east of the landmark point)
 function innMid() { const m = W0.inn; if (!m) return bishop.LM.inn; m.updateMatrixWorld(true); if (!m.geometry.boundingBox) m.geometry.computeBoundingBox(); return m.geometry.boundingBox.getCenter(new V3()).applyMatrix4(m.matrixWorld); }
 function panLook(t, fresh) {
   if (fresh || !pan.legs) buildPan();
-  const L = pan.legs.find((g) => t <= g[1]) || pan.legs[pan.legs.length - 1], u = Math.max(0, Math.min(1, (t - L[0]) / (L[1] - L[0])));
-  const s = u * u * u * (u * (u * 6 - 15) + 10), h = L[2] + (L[3] - L[2]) * s, c = Math.cos(pan.pitch) * pan.R, p = panPos(t);
-  return [p.x + Math.sin(h) * c, p.y + Math.sin(pan.pitch) * pan.R, p.z - Math.cos(h) * c];
+  const L = pan.legs.find((g) => t <= g[1]) || pan.legs[pan.legs.length - 1];
+  const h = L[2] + (L[3] - L[2]) * panEase((t - L[0]) / (L[1] - L[0])), pt = panPitch(t), c = Math.cos(pt) * pan.R, p = panPos(t);
+  return [p.x + Math.sin(h) * c, p.y + Math.sin(pt) * pan.R, p.z - Math.cos(h) * c];
 }
-// the camera starts a few metres up (so the Inn clears the near trees and rises) and eases down to the tee camera
-function panPos(t, fresh) { if (fresh || !pan.legs) buildPan(); const u = Math.max(0, Math.min(1, t / pan.dur)), s = u * u * u * (u * (u * 6 - 15) + 10); return tmpP.copy(pan.pos).setY(pan.pos.y + pan.lift * (1 - s)); }
+// the camera starts ~30 m above the tee ground (so the whole Inn clears the near trees) and eases down to the tee camera
+function panPos(t, fresh) { if (fresh || !pan.legs) buildPan(); return tmpP.copy(pan.pos).setY(pan.pos.y + pan.lift * (1 - panEase((t - pan.hold) / (pan.dur - pan.hold)))); }
 const tmpP = new V3();
 function startPan() {
   buildPan(); pan.t = 0; G.state = 'pan'; cam.to = null; applyPan(0);
@@ -1122,6 +1178,7 @@ if (TEST) {
     map: { id: MAP_ID, name: MAP.name, lat: MAP.lat, lon: MAP.lon, weatherLat: MAP.weatherLat, weatherLon: MAP.weatherLon, heading: HEADING },
     // real-world mapping of the Bishop Peak hole: tee / corner / cup as lat-lon, and the landmarks' lat-lon with their world positions
     geo: BISHOP ? { tee: bishop.worldToLl(TEE.x, TEE.z), corner: bishop.worldToLl(bishop.CORNER.x, bishop.CORNER.z), cup: bishop.worldToLl(CUP.x, CUP.z), site: bishop.SITE, landmarks: bishop.LM } : null,
+    W0, surfY: () => W0.backdrop && W0.backdrop.userData.surfaceY, camera,
     probe: TEST && BISHOP ? { fairwayDist, llToWorld: bishop.llToWorld } : null,
     TEE, CUP, bunkers: BUNKERS, pond: BISHOP ? bishop.POND : null, aimVia: BISHOP ? bishop.AIM_VIA : null, heightAt,
     // Bishop Peak scene facts for the tests: the M draped on the hillside, the real-elevation heightmaps, the Inn's placement
@@ -1191,7 +1248,7 @@ if (TEST) {
     lmWorld: () => BISHOP ? Object.fromEntries(Object.entries(bishop.LM).map(([k, v]) => [k, [v.x, k === 'm' || k === 'inn' ? heightAt(v.x, v.z) + 5 : bishop.yOf(v.elev, v.x, v.z), v.z]])) : null,
     sightline: (x, y, z) => { const c = camera.position; let m = 1e9; for (let i = 1; i < 194; i++) { const f = i / 200, px = c.x + (x - c.x) * f, pz = c.z + (z - c.z) * f; m = Math.min(m, c.y + (y - c.y) * f - heightAt(px, pz)); } return m; },
     get fov() { return camera.fov; },
-    panAt: (sec) => { pan.t = sec; if (G.state === 'pan') applyPan(sec); }, panLift: (m) => { pan.lift = m; }, heightAt,
+    panAt: (sec) => { pan.t = sec; if (G.state === 'pan') applyPan(sec); }, panLift: (m) => { pan.up = m; pan.legs = null; }, heightAt,
     get panState() { return { t: pan.t, dur: pan.dur, active: G.state === 'pan', legs: pan.legs, pos: pan.pos && pan.pos.toArray() }; },
     finishMove: () => { if (cam.to) { cam.tt = cam.dur; } },
     placeNearCup: (d = 0.9) => {
