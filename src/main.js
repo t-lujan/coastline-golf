@@ -282,7 +282,7 @@ function applyLook() {
   const clock = laClock(simDate);
   let phase = look.elev < -6 ? 'Moonlit night' : look.elev < 0 ? 'Twilight' : look.elev < 9 ? (sp.azimuth > 180 ? 'Golden hour' : 'Sunrise') : weather.fogFactor > 0.4 ? 'Marine layer' : sp.azimuth < 180 && look.elev < 30 ? 'Morning' : 'Daylight';
   if (weather.rain) phase = look.elev < -6 ? 'Rainy night' : 'Light rain';
-  $('wx-text').textContent = `${MAP.place} · ${weather.label.replace(/ \w+$/, '')} ${compass(weather.windFrom)} (${weather.rel}) · ${Math.round(weather.tempF)}°F`;
+  $('wx-text').textContent = `${MAP.place} · ${weather.label.replace(/ \w+$/, '')} ${compass(weather.windFrom)} · ${Math.round(weather.tempF)}°F`;
   $('wx-live').textContent = weather.live ? 'Live' : 'Typical';
   $('wx-live').classList.toggle('off', !weather.live);
   $('time-text').textContent = `${phase} · ${clock} PT${timeOverride ? ' (preview)' : ''}`;
