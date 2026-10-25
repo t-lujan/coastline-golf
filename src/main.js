@@ -1217,11 +1217,12 @@ if (TEST) {
     aimLinePts: (power, yaw) => { G.club = 'putter'; aimOv = { power, yaw }; updateAim(); aimOv = null; const m = W0.marker.position; return { pts: G.aimLinePts.map((p) => [p.x, p.z]), marker: [m.x, m.z], label: $('power-label').textContent, flat: flatPuttDist(power) }; },
     sim: (club, power, x, z, lie, yaw = 0, opts = {}) => {
       const b = new Ball(); b.place(x, z); if (lie) b.lie = lie; b.strike(club, power, yaw, opts.wind || { x: 0, z: 0 }, opts.curve || 0);
-      const fr = opts.frame || DT; let lip = 0;
-      for (let i = 0, n = Math.ceil(60 / fr); i < n && (b.state === 'flight' || b.state === 'roll'); i++) { b.step(fr); lip += b.events.filter((e) => e.type === 'lip').length; b.events.length = 0; }
+      const fr = opts.frame || DT; let lip = 0, land = null;
+      for (let i = 0, n = Math.ceil(60 / fr); i < n && (b.state === 'flight' || b.state === 'roll'); i++) { b.step(fr); if (land === null && b.carry !== null) land = { x: b.p.x, z: b.p.z }; lip += b.events.filter((e) => e.type === 'lip').length; b.events.length = 0; }
       const tot = Math.hypot(b.p.x - x, b.p.z - z), dx = Math.sin(yaw), dz = -Math.cos(yaw), lx = b.p.x - x, lz = b.p.z - z;
       return { carry: b.carry * YD, total: tot * YD, roll: (tot - b.carry) * YD, end: surfaceAt(b.p.x, b.p.z), x: b.p.x, z: b.p.z, state: b.state, lip,
-        apex: b.apex * YD, descent: b.landAngle, lateral: (lx * -dz + lz * dx) * YD /* + = right of the aim line */, t: b.t };
+        apex: b.apex * YD, descent: b.landAngle, lateral: (lx * -dz + lz * dx) * YD /* + = right of the aim line */, t: b.t,
+        landLateral: land ? ((land.x - x) * -dz + (land.z - z) * dx) * YD : null /* same, at the first touchdown (before any roll) */ };
     },
     // a putt rolling at the cup from `dist` metres away (offset: sideways miss in metres) at `speed` m/s: does it drop or lip out?
     cupTest: (speed, dist = 0.6, offset = 0) => {
