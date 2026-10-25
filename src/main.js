@@ -1,7 +1,7 @@
 // Coastline Golf · Hole 1 · Morro Rock / Bishop Peak (the active map is chosen in maps/index.js)
 import * as THREE from 'three';
 import { TEE, CUP, GREEN, PAR, HOLE_M, HOLE_YD, ROCK, STACKS, BOUNDS, HEADING, MAP_ID, WATER_LEVEL, BUNKERS, heightAt, surfaceAt, greenDist, normalAt, fairwayDist } from './course.js';
-import { MAP, MAPS, rememberMap } from './maps/index.js';
+import { MAP, MAPS, MAP_KEYS, rememberMap } from './maps/index.js';
 import * as bishop from './maps/bishop.js';
 import { landColor, createBackdrop, createBishopKnobs, createCerroM, createMadonnaInn, createInnSign, createDryGrass, createChaparral, createGranite, createFarOaks } from './bishop-scene.js';
 import { sunPosition, sceneDate, laClock, lookFor } from './sun.js';
@@ -814,6 +814,17 @@ $('info-close').addEventListener('click', () => { $('info').hidden = true; });
 $('info').addEventListener('click', (e) => { if (e.target === $('info')) $('info').hidden = true; });
 $('end-share').addEventListener('click', share);
 $('end-replay').addEventListener('click', () => { resetHole(); prepareShot(1.2); $('hint').hidden = G.hinted; });
+// previous / next hole follow the MAP_KEYS order; the active map is bound at import, so switching saves the pick and reloads with ?map=
+{
+  const at = MAP_KEYS.indexOf(MAP_ID);
+  const go = (btn, id, label) => {
+    btn.hidden = !id;
+    if (!id) return;
+    btn.textContent = `${label}: ${MAPS[id].name}`;
+    btn.addEventListener('click', () => { rememberMap(id); const u = new URL(location.href); u.searchParams.set('map', id); location.assign(u.toString()); });
+  };
+  go($('end-prev'), MAP_KEYS[at - 1], 'Previous'); go($('end-next'), MAP_KEYS[at + 1], 'Next');
+}
 $('start').addEventListener('click', () => {
   audio.unlock();
   $('loader').classList.add('gone'); setTimeout(() => { $('loader').hidden = true; }, 700);
@@ -1172,7 +1183,7 @@ if (TEST) {
       }
       return { summitGrey: +(st.sum[1] / st.sum[0]).toFixed(3), lowerGrey: +(st.low[1] / st.low[0]).toFixed(3), n: [st.sum[0], st.low[0]] };
     },
-    get state() { return G.state; }, get strokes() { return G.strokes; }, get ball() { return { ...ball.p, state: ball.state, lie: ball.lie }; },
+    showEnd, get state() { return G.state; }, get strokes() { return G.strokes; }, get ball() { return { ...ball.p, state: ball.state, lie: ball.lie }; },
     get fps() { return perf.fps; }, get fpsHistory() { return perf.history.slice(); }, get frameMs() { return { update: +perf.upd.toFixed(2), render: +perf.ren.toFixed(2) }; }, info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }), get quality() { return qLevel; }, get tierChanges() { return tierChanges; }, autoStart, get weather() { return weather; }, errors,
     get yaw() { return G.yaw; }, get preview() { return G.preview; }, get pvZoom() { return G.pvZoom; }, togglePreview, previewLand, tapPreview, get pvSpot() { return G.pvSpot; }, get pvLabel() { return $('pvtap').hidden ? '' : $('pvtap').textContent; }, get grid() { return { visible: W0.grid.mesh.visible, on: W0.grid.on, count: W0.grid.pts.length }; }, get club() { return G.club; }, W0, camera, renderer, scene,
     hole: { par: PAR, yd: HOLE_YD, m: HOLE_M },

@@ -145,6 +145,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .stats3 b { font-size: 22px; } .stats3 span { font-size: 10.5px; color: rgba(225, 245, 243, .75); text-transform: uppercase; letter-spacing: .08em; }
 .card .row { display: flex; gap: 10px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
 .card .row .btn { flex: 1; min-width: 140px; }
+.card .row.nav { margin-top: 10px; }
+.card .row.nav .btn { flex: 1 1 100%; min-width: 0; }
+.card .row .btn[hidden] { display: none; }
 #info .card { text-align: left; max-height: calc(100dvh - 32px - var(--sat) - var(--sab)); overflow: auto; touch-action: pan-y; user-select: text; -webkit-user-select: text; }
 #info h2 { margin: 0 0 10px; font-size: 26px; }
 #info ul { margin: 0; padding-left: 18px; line-height: 1.5; font-size: 14px; color: var(--aqua); }

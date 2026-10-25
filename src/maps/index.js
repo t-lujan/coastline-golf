@@ -16,7 +16,7 @@ export const MAPS = {
   },
 };
 export const MAP_KEYS = Object.keys(MAPS);
-const norm = (s) => { s = String(s || '').toLowerCase(); return s.startsWith('bishop') ? 'bishop' : s.startsWith('morro') ? 'morro' : null; };
+const norm = (s) => { s = String(s || '').toLowerCase(); return Object.keys(MAPS).find((k) => s.startsWith(k)) || null; };
 function pick() {
   let q = null, saved = null;
   try { q = norm(new URLSearchParams(location.search).get('map')); } catch (e) { /* no URL */ }
