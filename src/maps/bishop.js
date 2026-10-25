@@ -32,9 +32,9 @@ const LM_DEF = {
   chumash:  { lat: 35.30829, lon: -120.70634, elev: 387 },
   romualdo: { lat: 35.31419, lon: -120.72681, elev: 398 },
   hollister:{ lat: 35.34396, lon: -120.78636, elev: 430 },
-  // the white "M" (Mission College Prep): about halfway up the east face of Cerro San Luis, a short climb above the
-  // M Trail memorial (OSM 35.2825, -120.6731); placed on the east-facing slope at ~236 m on the baked heightmap
-  m:        { lat: 35.28351, lon: -120.67665, elev: 236 },
+  // the white "M" (Mission College Prep) on the east face of Cerro San Luis, at the OSM node for the M itself
+  // (historic=memorial name=M, 35.28237, -120.67465)
+  m:        { lat: 35.28237, lon: -120.67465, elev: 238 },
 };
 export const LM = {};
 for (const [k, v] of Object.entries(LM_DEF)) LM[k] = { ...v, ...llToWorld(v.lat, v.lon) };
