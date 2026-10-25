@@ -8,6 +8,18 @@ const FALLBACK = { tempF: 61, windMph: 10, windFrom: 300, gustMph: 14, cloud: 35
 
 export function compass(deg) { return ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'][Math.round(((deg % 360) + 360) % 360 / 22.5) % 16]; }
 
+// wind FROM `from` degrees (meteorological) at `mph` -> world vector in m/s (x east-ish, z toward the tee; world -Z points at `heading`)
+export function windVector(mph, from, heading = HEADING) {
+  const to = (from + 180 - heading) * Math.PI / 180, ms = Math.min(mph, 40) * 0.44704;   // safety cap only for extreme storms
+  return { x: Math.sin(to) * ms, z: -Math.cos(to) * ms };
+}
+
+// wind relative to the hole's line of play (world -Z): 'into', 'helping', 'L→R', 'R→L' and the in-between quarters
+export function windRel(from, heading = HEADING) {
+  const a = (((from - heading) % 360) + 360) % 360;
+  return ['into', 'into, R→L', 'R→L', 'helping, R→L', 'helping', 'helping, L→R', 'L→R', 'into, L→R'][Math.round(a / 45) % 8];
+}
+
 export async function getWeather(params, map) {
   let w = { ...FALLBACK };
   if (params.get('weather') !== 'offline') {
@@ -27,12 +39,14 @@ export async function getWeather(params, map) {
   if (o === 'clear') { w.visibility = 30000; w.cloud = 0; w.code = 0; }
   if (o === 'rain') { w.visibility = 6000; w.cloud = 98; w.code = 61; }
   if (o === 'windy') { w.windMph = 24; w.gustMph = 32; }
+  const wo = params.get('wind');   // ?wind=mph,fromDeg (test / preview)
+  if (wo) { const [m, f] = wo.split(',').map(Number); if (isFinite(m)) { w.windMph = m; w.gustMph = m; } if (isFinite(f)) w.windFrom = f; }
   w.rain = (w.code >= 51 && w.code <= 67) || (w.code >= 80 && w.code <= 82);
   const fogCodes = w.code === 45 || w.code === 48;
   w.fogFactor = Math.max(fogCodes ? 0.75 : 0, Math.min(1, Math.max(0, (6000 - w.visibility) / 5500)));
   // wind vector in world space (x east, z south): wind blows *toward* windFrom + 180
-  const to = (w.windFrom + 180 - HEADING) * Math.PI / 180, ms = w.windMph * 0.44704;
-  w.wind = { x: Math.sin(to) * ms, z: -Math.cos(to) * ms };
+  w.wind = windVector(w.windMph, w.windFrom);
   w.label = `${Math.round(w.windMph)} mph ${compass(w.windFrom)}`;
+  w.rel = windRel(w.windFrom);
   return w;
 }

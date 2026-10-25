@@ -5,7 +5,7 @@ import { MAP, MAPS, rememberMap } from './maps/index.js';
 import * as bishop from './maps/bishop.js';
 import { landColor, createBackdrop, createBishopKnobs, createCerroM, createMadonnaInn, createDryGrass, createChaparral, createGranite, createFarOaks } from './bishop-scene.js';
 import { sunPosition, sceneDate, laClock, lookFor } from './sun.js';
-import { getWeather, compass } from './weather.js';
+import { getWeather, compass, windVector } from './weather.js';
 import { createSky } from './sky.js';
 import { createWater } from './water.js';
 import { createTerrain, createHills, bakeDepth } from './terrain.js';
@@ -282,7 +282,7 @@ function applyLook() {
   const clock = laClock(simDate);
   let phase = look.elev < -6 ? 'Moonlit night' : look.elev < 0 ? 'Twilight' : look.elev < 9 ? (sp.azimuth > 180 ? 'Golden hour' : 'Sunrise') : weather.fogFactor > 0.4 ? 'Marine layer' : sp.azimuth < 180 && look.elev < 30 ? 'Morning' : 'Daylight';
   if (weather.rain) phase = look.elev < -6 ? 'Rainy night' : 'Light rain';
-  $('wx-text').textContent = `${MAP.place} · ${weather.label.replace(/ \w+$/, '')} ${compass(weather.windFrom)} · ${Math.round(weather.tempF)}°F`;
+  $('wx-text').textContent = `${MAP.place} · ${weather.label.replace(/ \w+$/, '')} ${compass(weather.windFrom)} (${weather.rel}) · ${Math.round(weather.tempF)}°F`;
   $('wx-live').textContent = weather.live ? 'Live' : 'Typical';
   $('wx-live').classList.toggle('off', !weather.live);
   $('time-text').textContent = `${phase} · ${clock} PT${timeOverride ? ' (preview)' : ''}`;
@@ -1139,7 +1139,7 @@ if (TEST) {
         inn: { dist: Math.hypot(inn.x - L.inn.x, inn.z - L.inn.z), y: inn.y, ground: heightAt(L.inn.x, L.inn.z) },
         backdropTris: W0.backdrop.userData.tris, rocks: W0.rock.geometry.attributes.position.count / 3 };
     },
-    surfaceAt, autoClub: () => autoClub(),
+    surfaceAt, autoClub: () => autoClub(), weather: () => weather, windVector,
     // put the ball down anywhere and set up the shot (auto club) as if it had come to rest there
     place: (x, z) => { ball.place(x, z); G.manualClub = false; prepareShot(0.2); cam.tt = cam.dur; return { lie: ball.lie, club: G.club }; },
     // a windless shot from (x, z) with a given lie: carry / total / roll in yards
