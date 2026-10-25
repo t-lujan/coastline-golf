@@ -14,7 +14,7 @@ import { createRock } from './rock.js';
 import { windUniforms, leafUniforms, createGrass, createTrees, createShrubs, createFlowers, createIcePlant, createBeachRocks, createDriftwood, lodScatter } from './vegetation.js';
 import { createBoats, createWisps, createMist } from './atmos.js';
 import { rimUniforms, tameUniforms } from './noise.js';
-import { Ball, BALL_R, CLUBS, SURF, DT, predict } from './physics.js';
+import { Ball, BALL_R, CLUBS, SURF, DT, predict, flatPuttDist } from './physics.js';
 import { Ribbon, groundLine, createMarker, Particles, puff, confetti } from './fx.js';
 import { QUALITY, createPost } from './post.js';
 import { Audio } from './audio.js';
@@ -685,7 +685,9 @@ const drag = { on: false, x0: 0, y0: 0, x: 0, y: 0, id: null };
 const pvPtr = new Map();   // preview: a horizontal drag turns the aim, a pinch zooms, and neither can swing
 const pvTap = { bad: false, t: 0 };   // a tap = one finger, little movement, quick
 const pvZoom = (k) => { G.pvZoom = Math.max(0.5, Math.min(1.8, G.pvZoom * k)); };
+let aimOv = null;
 function dragShot() {
+  if (TEST && aimOv) return aimOv;
   const dx = drag.x - drag.x0, dy = drag.y - drag.y0, len = Math.hypot(dx, dy);
   const scale = 0.34 * Math.min(W, H);
   const power = Math.min(1, len / scale);
@@ -749,15 +751,14 @@ function updateAim() {
   $('power').hidden = false; $('power-fill').style.transform = `scaleX(${s.power})`;
   let len, land;
   if (G.club === 'putter') {
-    const now = performance.now();
-    if (now - aimCache > 40 || !G.lastPred) { aimCache = now; G.lastPred = predict(ball.p, ball.lie, 'putter', s.power, s.yaw, { x: 0, z: 0 }, 0, []); }
-    len = Math.min(40, Math.hypot(G.lastPred.end.x - ball.p.x, G.lastPred.end.z - ball.p.z));   // where it would stop, slope and all
+    // a straight line along the aim for the flat-ground roll of this power: reading the break from the grid is up to the player
+    len = Math.min(40, flatPuttDist(s.power));
     $('power-label').textContent = `${Math.round(s.power * 100)}% · ~${Math.round(len * 3.28)} ft`;
-    // the preview follows the predicted roll, so the break on a sloping green bends the line
-    const e = G.lastPred.state === 'holed' ? CUP : G.lastPred.end; land = { x: e.x, z: e.z };
-    const path = G.lastPred.path.filter((p, i, a) => i % Math.max(1, Math.ceil(a.length / 190)) === 0 || i === a.length - 1);
-    W0.aimLine.set(path.map((p) => ({ x: p.x, y: Math.max(0.05, heightAt(p.x, p.z)) + 0.12, z: p.z })));
-    W0.marker.visible = true; W0.marker.position.set(land.x, Math.max(0.05, heightAt(land.x, land.z)) + 0.08, land.z);
+    const pts = groundLine(ball.p, s.yaw, len, 0.25);
+    const ex = ball.p.x + Math.sin(s.yaw) * len, ez = ball.p.z - Math.cos(s.yaw) * len;
+    pts.push({ x: ex, y: Math.max(0.05, heightAt(ex, ez)) + 0.12, z: ez });
+    W0.aimLine.set(pts); G.aimLinePts = pts;
+    W0.marker.visible = true; W0.marker.position.set(ex, Math.max(0.05, heightAt(ex, ez)) + 0.08, ez);
     return;
   } else {
     const now = performance.now();
@@ -766,7 +767,7 @@ function updateAim() {
     land = { x: cp.x, z: cp.z };   // where it lands, draw / fade included
     $('power-label').textContent = `${CLUBS[G.club].name} · ${Math.round(s.power * 100)}% · carry ${yd(len)} yd${G.curve ? (G.curve < 0 ? ' · draw' : ' · fade') : ''}`;
   }
-  if (G.club === 'putter') W0.aimLine.set(groundLine(ball.p, s.yaw, len, 0.25)); else W0.aimLine.set([]);
+  W0.aimLine.set([]);
   W0.marker.visible = true; W0.marker.position.set(land.x, Math.max(0.05, heightAt(land.x, land.z)) + 0.08, land.z);
 }
 for (const b of document.querySelectorAll('#clubs button[data-club]')) b.addEventListener('click', () => { if (G.state !== 'aim') return; setClub(b.dataset.club, true); if (G.preview && b.dataset.club === 'putter') togglePreview(false); else if (!G.preview) tweenTo(aimPose(), 0.6); });
@@ -1201,6 +1202,8 @@ if (TEST) {
     place: (x, z) => { ball.place(x, z); G.manualClub = false; prepareShot(0.2); cam.tt = cam.dur; return { lie: ball.lie, club: G.club }; },
     // a windless shot from (x, z) with a given lie: carry / total / roll in yards
     // opts: { wind: {x, z}, curve: -1..1, frame: seconds per step (default 1/240) }
+    // runs updateAim for a putter drag of (power, yaw): the straight preview line, its marker and label
+    aimLinePts: (power, yaw) => { G.club = 'putter'; aimOv = { power, yaw }; updateAim(); aimOv = null; const m = W0.marker.position; return { pts: G.aimLinePts.map((p) => [p.x, p.z]), marker: [m.x, m.z], label: $('power-label').textContent, flat: flatPuttDist(power) }; },
     sim: (club, power, x, z, lie, yaw = 0, opts = {}) => {
       const b = new Ball(); b.place(x, z); if (lie) b.lie = lie; b.strike(club, power, yaw, opts.wind || { x: 0, z: 0 }, opts.curve || 0);
       const fr = opts.frame || DT; let lip = 0;

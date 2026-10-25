@@ -106,9 +106,9 @@ export class Ball {
   }
   roll(dt) {
     const p = this.p, v = this.v, w = this.w, R = BALL_R;
-    const surf = surfaceAt(p.x, p.z), S = SURF[surf];
+    const surf = this.flat ? 'green' : surfaceAt(p.x, p.z), S = SURF[surf];
     if (surf === 'water') { this.state = 'water'; this.events.push({ type: 'water', at: { ...p } }); return; }
-    const n = normalAt(p.x, p.z);
+    const n = this.flat ? { x: 0, y: 1, z: 0 } : normalAt(p.x, p.z);
     this.rollT += dt;
     // gravity along the slope (the break on a putt)
     v.x += n.x * n.y * G * dt; v.z += n.z * n.y * G * dt;
@@ -128,7 +128,7 @@ export class Ball {
       w.x = v.z / R; w.z = -v.x / R;
     }
     p.x += v.x * dt; p.z += v.z * dt; p.y = this.ground(); v.y = 0;
-    this.checkCup(Math.hypot(v.x, v.z));
+    if (!this.flat) this.checkCup(Math.hypot(v.x, v.z));
     const sp2 = Math.hypot(v.x, v.z);
     if (this.state === 'roll' && sp2 < 0.04 && slope < fr * 1.02) { v.x = v.z = 0; w.x = w.y = w.z = 0; this.state = 'rest'; this.lie = surf; this.events.push({ type: 'rest' }); }
     if (this.t > 40) { this.state = 'rest'; this.lie = surf; }
@@ -190,6 +190,17 @@ export class Ball {
 
 // quick prediction for the aim readout (carry + total); path: an array to fill with the ground track every ~step metres
 // (the putt preview line, so the break on a sloping green shows before the stroke)
+// how far a putt of this power rolls on perfectly flat green (no slope, no cup): the straight preview line length
+const flatCache = new Map();
+export function flatPuttDist(power) {
+  const k = Math.round(power * 200);
+  if (!flatCache.has(k)) {
+    const b = new Ball(); b.flat = true; b.place(0, 0); b.lie = 'green'; b.strike('putter', k / 200, 0, { x: 0, z: 0 }, 0);
+    for (let i = 0; i < 240 * 40 && b.state === 'roll'; i++) b.sub(DT);
+    flatCache.set(k, Math.hypot(b.p.x, b.p.z));
+  }
+  return flatCache.get(k);
+}
 export function predict(start, lie, club, power, yaw, wind, curve = 0, path = null, step = 0.25) {
   const b = new Ball(); b.p = { ...start }; b.lie = lie; b.strike(club, power, yaw, wind, curve);
   let carryPt = null, last = { ...start };
