@@ -3,8 +3,8 @@
 // oak scatter. Heights come from the active map's heightAt (baked Terrarium tiles under a hand-shaped hole).
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import { BOUNDS, GREEN, TEE, HEADING, heightAt, surfaceAt, bunkerDist, fbm } from './course.js';
-import { LM, pondDist, sightK, enToWorld, elevAt, baseY } from './maps/bishop.js';
+import { BOUNDS, GREEN, TEE, HEADING, heightAt, surfaceAt, bunkerDist, fairwayDist, fbm } from './course.js';
+import { LM, llToWorld, pondDist, sightK, enToWorld, elevAt, baseY } from './maps/bishop.js';
 import { fbm3, GLSL_NOISE } from './noise.js';
 import { rng, swayMaterial, scatter, clump, mergeTree, nearPlay, posOnly } from './vegetation.js';
 
@@ -45,9 +45,14 @@ const bsearch = (arr, v) => { let lo = 0, hi = arr.length - 2; while (lo < hi) {
 
 // what a patch of hillside is covered with, from its real elevation, slope, aspect and whether it sits in a draw
 const COL = {
-  gold0: [0.48, 0.38, 0.21], gold1: [0.62, 0.51, 0.31], green: [0.3, 0.32, 0.14], oak: [0.1, 0.13, 0.06], chap: [0.22, 0.24, 0.13],
+  gold0: [0.55, 0.5, 0.22], gold1: [0.66, 0.61, 0.3], green: [0.3, 0.34, 0.14], oak: [0.1, 0.13, 0.06], chap: [0.22, 0.25, 0.15],
+  scrub: [0.24, 0.3, 0.22], field0: [0.32, 0.42, 0.14], field1: [0.42, 0.48, 0.18], rough: [0.29, 0.37, 0.13],
   rock: [0.34, 0.26, 0.17], rock2: [0.43, 0.34, 0.22], lichen: [0.42, 0.32, 0.17], joint: [0.2, 0.18, 0.15], town: [0.3, 0.32, 0.22],
 };
+// the real land cover round the Inn (OSM): the farmland the hole sits in, the pasture round the Inn, grassland at Cerro's foot
+const FARM = [[35.26766, -120.67588], [35.27227, -120.67293]].map(([a, o]) => llToWorld(a, o));
+const FARM_R = { minX: Math.min(FARM[0].x, FARM[1].x), maxX: Math.max(FARM[0].x, FARM[1].x), minZ: Math.min(FARM[0].z, FARM[1].z), maxZ: Math.max(FARM[0].z, FARM[1].z) };
+const rectIn = (R, x, z, m) => (1 - sstep(0, m, Math.max(R.minX - x, x - R.maxX, R.minZ - z, z - R.maxZ)));
 const mix3 = (c, d, t) => { c[0] += (d[0] - c[0]) * t; c[1] += (d[1] - c[1]) * t; c[2] += (d[2] - c[2]) * t; };
 export function landColor(x, z, out) {
   const e = 22, h = heightAt(x, z), hx = (heightAt(x + e, z) - heightAt(x - e, z)) / (2 * e), hz = (heightAt(x, z + e) - heightAt(x, z - e)) / (2 * e);
@@ -69,6 +74,15 @@ export function landColor(x, z, out) {
   const chap = Math.max(sstep(0.66, 0.72, slope * 0.7 + n2 * 0.45 + north * 0.15 + (n3 - 0.5) * 0.25) * sstep(130, 200, elev),
     morro * sstep(170, 230, elev + n2 * 60) * sstep(0.35, 0.5, n2 + n3 * 0.3 + north * 0.2));
   mix3(out, COL.chap, chap * (1 - oak) * 0.9);
+  // fall green-grey scrub (coyote brush, sage, chaparral) on the hills: a noise mask, denser on the steep and north faces
+  const scrub = sstep(0.5, 0.6, n3 * 0.6 + n2 * 0.4 + slope * 0.5 + north * 0.18 * sstep(0.05, 0.2, slope)) * sstep(0.06, 0.16, slope) * (1 - oak);
+  mix3(out, COL.scrub, scrub * 0.85);
+  // the valley floor: irrigated farmland and cattle pasture, muted green-gold; the rough along the hole a darker, greener grass
+  const flat = (1 - sstep(88, 115, elev)) * (1 - sstep(0.07, 0.15, slope)), farm = Math.max(flat * 0.85, rectIn(FARM_R, x, z, 60) * (1 - sstep(0.1, 0.2, slope)));
+  const fc = [COL.field0[0], COL.field0[1], COL.field0[2]]; mix3(fc, COL.field1, Math.min(1, n2 * 0.8 + n3 * 0.4));
+  mix3(out, fc, farm * (1 - chap) * 0.92);
+  const fd = Math.abs(x) < 900 && Math.abs(z) < 900 ? fairwayDist(x, z) : 999;
+  mix3(out, COL.rough, (1 - sstep(30, 70, fd + n3 * 20)) * 0.8);
   // the valley floor out toward town: street trees and roofs, a muted mottle
   const r = Math.hypot(x, z); mix3(out, COL.town, sstep(1400, 2400, r) * (1 - sstep(70, 95, elev)) * (1 - sstep(0.12, 0.25, slope)) * 0.6 * sstep(0.35, 0.6, n3));
   // grey rock: Bishop Peak's crown and upper south / east faces, a little on Cerro San Luis and Chumash near their tops

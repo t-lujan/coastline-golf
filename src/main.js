@@ -1,6 +1,6 @@
 // Coastline Golf · Hole 1 · Morro Rock / Bishop Peak (the active map is chosen in maps/index.js)
 import * as THREE from 'three';
-import { TEE, CUP, GREEN, PAR, HOLE_M, HOLE_YD, ROCK, STACKS, BOUNDS, HEADING, MAP_ID, WATER_LEVEL, BUNKERS, heightAt, surfaceAt, greenDist, normalAt } from './course.js';
+import { TEE, CUP, GREEN, PAR, HOLE_M, HOLE_YD, ROCK, STACKS, BOUNDS, HEADING, MAP_ID, WATER_LEVEL, BUNKERS, heightAt, surfaceAt, greenDist, normalAt, fairwayDist } from './course.js';
 import { MAP, MAPS, rememberMap } from './maps/index.js';
 import * as bishop from './maps/bishop.js';
 import { landColor, createBackdrop, createBishopKnobs, createCerroM, createMadonnaInn, createDryGrass, createChaparral, createGranite, createFarOaks } from './bishop-scene.js';
@@ -1122,6 +1122,7 @@ if (TEST) {
     map: { id: MAP_ID, name: MAP.name, lat: MAP.lat, lon: MAP.lon, weatherLat: MAP.weatherLat, weatherLon: MAP.weatherLon, heading: HEADING },
     // real-world mapping of the Bishop Peak hole: tee / corner / cup as lat-lon, and the landmarks' lat-lon with their world positions
     geo: BISHOP ? { tee: bishop.worldToLl(TEE.x, TEE.z), corner: bishop.worldToLl(bishop.CORNER.x, bishop.CORNER.z), cup: bishop.worldToLl(CUP.x, CUP.z), site: bishop.SITE, landmarks: bishop.LM } : null,
+    probe: TEST && BISHOP ? { fairwayDist, llToWorld: bishop.llToWorld } : null,
     TEE, CUP, bunkers: BUNKERS, pond: BISHOP ? bishop.POND : null, aimVia: BISHOP ? bishop.AIM_VIA : null, heightAt,
     // Bishop Peak scene facts for the tests: the M draped on the hillside, the real-elevation heightmaps, the Inn's placement
     bishopCheck: () => {

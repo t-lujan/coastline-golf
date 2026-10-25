@@ -32,6 +32,10 @@ const PALETTES = {
     // the same, starting from the backdrop's land colour (vBase) so the hole and the hills share one ground
     groundBase: `vec3 col = vBase * (0.86 + nG * 0.2) * (0.9 + 0.2 * cgN2(vec2(p.x * 1.7, p.y * 5.3) + nF)) * (0.88 + 0.24 * nz);
         vec3 sn = normalize(cross(dFdx(vWP), dFdy(vWP)));
+        // field texture on the green-gold farmland: faint drill rows and stubble strips, gone on slopes and with distance
+        float fieldK = smoothstep(0.0, 0.06, vBase.g - vBase.r) * smoothstep(0.96, 0.99, sn.y) * (1.0 - smoothstep(60.0, 260.0, length(cameraPosition - vWP)));
+        float rows = abs(fract(dot(p, vec2(0.94, 0.34)) / 2.6) - 0.5) * 2.0, strip = smoothstep(0.35, 0.65, cgN2(vec2(dot(p, vec2(0.34, -0.94)) * 0.02, 0.5)));
+        col *= 1.0 + fieldK * ((smoothstep(0.55, 0.9, rows) - 0.5) * 0.12 + (strip - 0.5) * 0.14);
         col = mix(col, vec3(0.21, 0.24, 0.12) * (0.8 + nF * 0.4), smoothstep(0.3, 0.6, 1.0 - abs(sn.y)) * 0.5);`,
     fairway: `float wob = (nF - 0.5) * 0.35 + (nM - 0.5) * 0.7;
           // the mowed edge fades through a first cut and a few metres of intermediate rough where the green turf thins
