@@ -57,26 +57,26 @@ const Q0 = qfit(0, 0);
 export const baseY = (x, z) => BASE + K_LOCAL * (qfit(x, z) - Q0);
 
 // ---------- the hole ----------
-// a short par 4 on the farmland north of the Madonna Inn: the tee sits ~260 m north of the Inn, the drive plays north up
+// a full-length par 4 on the farmland north of the Madonna Inn: the tee sits ~300 m north of the Inn, the drive plays north up
 // the field to the corner, then the approach turns left (west) to a green near the field's north-west edge, short of
 // Fernandez Road; US-101 stays >80 m to the east
 export const BOUNDS = { minX: -330, maxX: 330, minZ: -330, maxZ: 420 };
-export const PAINT = { minX: -160, maxX: 50, minZ: -80, maxZ: 230 };
-export const TEE = { x: 0, z: 184, w: 7, d: 5, h: baseY(0, 184) + 0.9, bank: 24 };
-const g0 = along(280, 120);
+export const PAINT = { minX: -200, maxX: 50, minZ: -85, maxZ: 275 };
+export const TEE = { x: 0, z: 230, w: 7, d: 5, h: baseY(0, 230) + 0.9, bank: 24 };
+const g0 = along(280, 150);
 export const GREEN = { x: Math.round(g0.x * 10) / 10, z: Math.round(g0.z * 10) / 10, rx: 16, rz: 13.5 };
 export const CUP = { x: GREEN.x - 3.6, z: GREEN.z - 3.9 };
-export const FAIRWAY = [[0, 168], [0, 110], [0, 50], [-6, 10], [-26, -8], [-60, -18], [GREEN.x + 17, GREEN.z + 4]];
+export const FAIRWAY = [[0, 214], [0, 150], [0, 80], [0, 40], [-6, 10], [-26, -8], [-60, -18], [-100, -28], [GREEN.x + 17, GREEN.z + 4]];
 export const FAIRWAY_HALF = 14;
 export const CORNER = { x: 0, z: 0 };
 // the first shot aims here from the tee (the cup is round the corner to the left)
 export const AIM_VIA = { x: 0, z: -4, until: 200 };
 // from: where the shot into the bunker comes from, so its lip is built up on the far side
 export const BUNKERS = [
-  { x: 17, z: -8, r: 6.4, face: 1.1, from: [0, 184] },                  // through the corner, right (~200 yd carry)
-  { x: -19, z: 22, r: 6.6, face: 1.25, from: [0, 120] },                // inside the dogleg corner
-  { x: GREEN.x + 17, z: GREEN.z + 13, r: 5.4, face: 0.5, from: [-50, -16] },  // greenside, front left
-  { x: GREEN.x - 15, z: GREEN.z - 15, r: 5.0, face: 0.4, from: [-50, -16] },  // greenside, back right
+  { x: 17, z: -8, r: 6.4, face: 1.1, from: [0, 230] },                  // through the corner, right (~260 yd from the tee)
+  { x: -19, z: 22, r: 6.6, face: 1.25, from: [0, 150] },                // inside the dogleg corner (~230 yd from the tee)
+  { x: GREEN.x + 17, z: GREEN.z + 13, r: 5.4, face: 0.5, from: [-90, -26] },  // greenside, front left
+  { x: GREEN.x - 15, z: GREEN.z - 15, r: 5.0, face: 0.4, from: [-90, -26] },  // greenside, back right
 ];
 export const POND = { x: -62, z: 30, rx: 12, rz: 8, a: 0.35 };
 export const WATER_LEVEL = baseY(POND.x, POND.z) - 2.4;   // the pond surface (there is no sea here)
