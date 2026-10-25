@@ -82,6 +82,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .live::before { content: ""; position: absolute; left: 6px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: #7fe3c4; box-shadow: 0 0 0 0 rgba(127, 227, 196, .7); animation: pulse 2s infinite; }
 .live.off { color: rgba(225, 245, 243, .7); background: rgba(225, 245, 243, .1); } .live.off::before { background: rgba(225, 245, 243, .5); animation: none; }
 @keyframes pulse { 70% { box-shadow: 0 0 0 7px rgba(127, 227, 196, 0); } 100% { box-shadow: 0 0 0 0 rgba(127, 227, 196, 0); } }
+#hud.intro .chips, #hud.intro .bottom, #hud.intro .buttons > :not(#btn-menu) { visibility: hidden; }
 .buttons { display: flex; gap: 6px; pointer-events: auto; }
 #hud .bottom { position: absolute; left: calc(10px + var(--sal)); right: calc(10px + var(--sar)); bottom: calc(10px + var(--sab)); display: flex; justify-content: space-between; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
 .stats { display: flex; gap: 16px; padding: 9px 14px; }

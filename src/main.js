@@ -661,6 +661,7 @@ function startPan() {
 function startFlyover() {
   buildFlyover();
   G.state = 'flyover'; fly.t = 0;
+  $('hud').classList.add('intro'); $('hud').hidden = false;   // only the menu button shows during the intro
   $('flytitle').hidden = false; $('flytitle').classList.add('show');
 }
 function endFlyover(quick) {
@@ -675,7 +676,7 @@ function endFlyover(quick) {
 function endPan() { G.yaw = aimYaw(); const a = aimPose(); camera.position.copy(a.pos); cam.look.copy(a.look); camera.lookAt(cam.look); setFov(baseFov); toAim(0); }
 function toAim(dur) {
   if (dur > 0) tweenTo(aimPose(), dur); else cam.to = null;
-  G.state = 'aim'; $('hud').hidden = false;
+  G.state = 'aim'; $('hud').hidden = false; $('hud').classList.remove('intro');
   if (!G.hinted) $('hint').hidden = false;
   updateHud();
 }
@@ -809,6 +810,12 @@ $('btn-quality').addEventListener('click', () => {
   toast(`Graphics: ${$('q-label').textContent}${$('q-level').textContent}`, 1100);
 });
 const openInfo = () => { $('info').hidden = false; };
+// menu: reload to the start screen with the current map kept, no autostart / nofly (the map picker marks the current hole)
+$('btn-menu').addEventListener('click', () => {
+  rememberMap(MAP_ID);
+  const u = new URL(location.href); u.searchParams.set('map', MAP_ID); u.searchParams.delete('autostart'); u.searchParams.delete('nofly');
+  location.assign(u.toString());
+});
 $('btn-info').addEventListener('click', openInfo); $('end-info').addEventListener('click', openInfo);
 $('info-close').addEventListener('click', () => { $('info').hidden = true; });
 $('info').addEventListener('click', (e) => { if (e.target === $('info')) $('info').hidden = true; });
