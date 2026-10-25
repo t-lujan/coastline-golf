@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { heightAt, surfaceAt, fairwayDist, greenDist, bunkerDist, wasteDist, sandiness, duneSand, teeDist, inland, fbm, FAIRWAY_HALF, HEADING, ROCK, BOUNDS, TEE, GREEN, MAP_ID } from './course.js';
-import { pondDist, sightK } from './maps/bishop.js';
+import { pondDist, sightK, llToWorld } from './maps/bishop.js';
 import { fbm3, rimUniforms, tameUniforms, GLSL_RIM_DECL, GLSL_RIM, GLSL_NOISE } from './noise.js';
 
 export const windUniforms = { uTime: { value: 0 }, uWind: { value: new THREE.Vector2(1, 0) }, uGust: { value: 0.5 } };
@@ -545,12 +545,37 @@ function treeSpots() {
 
 // Bishop Peak: coast live oak woodland in clumps beside the hole and on the knolls, kept out of the sightlines to the
 // mountains and the Inn (see sightK) so the backdrop reads from the tee and from the green
+// tree-bearing OpenStreetMap features round the hole (lat, lon), thinned from cg-tools/osm_inn_area.txt
+const OSM_TREES = {
+  stream: [[[35.27051, -120.67652], [35.27042, -120.67643], [35.27024, -120.67613], [35.27009, -120.67589], [35.26964, -120.67514], [35.26940, -120.67474], [35.26921, -120.67454], [35.26898, -120.67443], [35.26827, -120.67430], [35.26799, -120.67420], [35.26761, -120.67377], [35.26760, -120.67374]],
+    [[35.27305, -120.68125], [35.27274, -120.68086], [35.27254, -120.68076], [35.27232, -120.68051], [35.27219, -120.68017], [35.27205, -120.67984], [35.27193, -120.67945], [35.27197, -120.67932], [35.27199, -120.67923], [35.27192, -120.67914], [35.27171, -120.67896], [35.27151, -120.67866], [35.27131, -120.67844], [35.27109, -120.67815], [35.27088, -120.67788], [35.27042, -120.67726], [35.27048, -120.67700]],
+    [[35.27048, -120.67700], [35.27062, -120.67668], [35.27051, -120.67652]],
+    [[35.26754, -120.67367], [35.26749, -120.67365], [35.26726, -120.67367], [35.26710, -120.67373], [35.26687, -120.67373], [35.26667, -120.67378], [35.26649, -120.67377], [35.26627, -120.67380], [35.26610, -120.67391], [35.26587, -120.67425], [35.26559, -120.67463], [35.26536, -120.67490], [35.26510, -120.67521], [35.26485, -120.67558]],
+    [[35.26760, -120.67374], [35.26754, -120.67367]]],
+  creek: [[[35.27255, -120.67078], [35.27204, -120.67091], [35.27160, -120.67115], [35.27118, -120.67154], [35.27084, -120.67193], [35.27057, -120.67219], [35.27028, -120.67231], [35.26998, -120.67225], [35.26960, -120.67206], [35.26930, -120.67186], [35.26902, -120.67177]],
+    [[35.26902, -120.67177], [35.26878, -120.67183], [35.26862, -120.67203], [35.26850, -120.67228], [35.26841, -120.67248], [35.26820, -120.67281], [35.26790, -120.67278], [35.26730, -120.67276], [35.26707, -120.67258], [35.26683, -120.67238], [35.26658, -120.67239], [35.26630, -120.67248], [35.26605, -120.67264], [35.26572, -120.67281]]],
+  path: [[[35.27486, -120.67240], [35.27403, -120.67267], [35.27390, -120.67295], [35.27365, -120.67307], [35.27103, -120.67293], [35.26743, -120.67374], [35.26683, -120.67381], [35.26645, -120.67389], [35.26617, -120.67423], [35.26595, -120.67445], [35.26541, -120.67504], [35.26517, -120.67544], [35.26475, -120.67576], [35.26471, -120.67568]]],
+  wood: [[[35.27371, -120.67250], [35.27370, -120.67236], [35.27317, -120.67236], [35.27246, -120.67240], [35.27250, -120.67247], [35.27258, -120.67251], [35.27269, -120.67267], [35.27275, -120.67270], [35.27294, -120.67268], [35.27302, -120.67265], [35.27309, -120.67257], [35.27321, -120.67255], [35.27347, -120.67280], [35.27353, -120.67278], [35.27371, -120.67250]],
+    [[35.27393, -120.67282], [35.27403, -120.67297], [35.27440, -120.67270], [35.27434, -120.67292], [35.27472, -120.67319], [35.27491, -120.67300], [35.27478, -120.67256], [35.27483, -120.67218], [35.27456, -120.67187], [35.27490, -120.67163], [35.27484, -120.67147], [35.27430, -120.67200], [35.27391, -120.67245], [35.27393, -120.67282]]],
+  scrub: [[[35.26906, -120.68177], [35.26807, -120.68091], [35.26691, -120.67998], [35.26665, -120.67786], [35.26797, -120.67765], [35.26553, -120.67696], [35.26455, -120.67923], [35.26500, -120.68031], [35.26606, -120.68003], [35.26643, -120.68095], [35.26767, -120.68301], [35.26805, -120.68367], [35.26906, -120.68177]]],
+};
+const FLY_IN = [[30, 40], [29, 124], [20, 164], [0, 195]];
+const segDist = (x, z, L) => {
+  let m = 1e9;
+  for (let i = 1; i < L.length; i++) {
+    const [ax, az] = L[i - 1], dx = L[i][0] - ax, dz = L[i][1] - az, u = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
+    m = Math.min(m, Math.hypot(x - ax - dx * u, z - az - dz * u));
+  }
+  return m;
+};
 function treeSpotsBishop() {
   const R = rng(77), spots = [];
   const ok = (x, z, clear) => {
     const s = surfaceAt(x, z); if (s === 'water' || s === 'green' || s === 'tee') return false;
     if (nearPlay(x, z) < clear || pondDist(x, z) < 7 || sightK(x, z) > 0.3) return false;
-    return Math.hypot(x - TEE.x, z - TEE.z) > 14;
+    // nothing within 25 m (plus a crown) of the opening pan's camera (it turns on the spot behind the tee)
+    // and the fly-in's last low leg down onto that camera (only ~20-30 m up there), kept clear by the same margin
+    return Math.hypot(x - TEE.x, z - TEE.z) > 14 && Math.hypot(x - TEE.x, z - TEE.z - 11) > 34 && segDist(x, z, FLY_IN) > 22;
   };
   const clearOf = (x, z, minD) => !spots.some((s) => Math.hypot(s.x - x, s.z - z) < minD);
   const grove = (cx, cz, n, rad, { minD = 10.5, clear = 9, sc = [0.75, 1.25], pri = 1 } = {}) => {
@@ -563,24 +588,42 @@ function treeSpotsBishop() {
       spots.push({ kind: 'oak', x, z, sc: lerp(sc[0], sc[1], R()), pri: placed < Math.ceil(n * 0.5) ? pri : pri + 1 }); placed++;
     }
   };
-  // groves, not rows: a few framing groves where the hole needs them, then clusters of 3-9 trees seeded where oaks really
-  // grow here, in the swales and on the cooler (north-facing) side of the low rises, with crowns almost touching
-  grove(-52, 238, 6, 26, { pri: 1, minD: 9 }); grove(-70, 128, 8, 30, { pri: 1, minD: 9 }); grove(-46, 46, 4, 20, { pri: 1, minD: 9.5 });
-  grove(74, 222, 4, 20, { pri: 1, minD: 9 }); grove(-16, 340, 5, 22, { pri: 1, minD: 9 });
-  grove(64, -58, 5, 22, { pri: 1, minD: 9 }); grove(118, 36, 6, 26, { pri: 1, minD: 9 }); grove(214, 2, 4, 20, { pri: 1, minD: 9.5 });
-  const nb = HEADING * Math.PI / 180;
-  for (let t = 0, made = 0; made < 16 && t < 4000; t++) {
-    const x = -290 + R() * 620, z = -280 + R() * 640, fw = nearPlay(x, z); if (fw < 26) continue;
-    const e = 12, hx = (heightAt(x + e, z) - heightAt(x - e, z)) / (2 * e), hz = (heightAt(x, z + e) - heightAt(x, z - e)) / (2 * e), sl = Math.hypot(hx, hz);
-    const ring = (heightAt(x + 30, z) + heightAt(x - 30, z) + heightAt(x, z + 30) + heightAt(x, z - 30)) / 4, curv = ring - heightAt(x, z);
-    const north = sl > 0.02 ? (hx * Math.sin(nb) + hz * Math.cos(nb)) / sl : 0;
-    if (curv * 0.8 + north * 0.6 + fbm(x * 0.01 + 3, z * 0.01) - 0.5 < 0.15 || !ok(x, z, 22)) continue;
-    grove(x, z, 3 + Math.floor(R() * 7), 18, { pri: made % 3 === 0 ? 2 : 3, minD: 8.5 + R() * 2.5, clear: 20 }); made++;
-  }
-  // a few lone oaks out in the grass
-  for (let t = 0, n = 0; n < 14 && t < 3000; t++) {
-    const x = -300 + R() * 640, z = -260 + R() * 600;
-    if (!ok(x, z, 24) || !clearOf(x, z, 26)) continue;
+  // laid out on the real ground round the farmland (OpenStreetMap, cg-tools/osm_inn_area.txt): riparian oaks along San Luis
+  // Obispo Creek (east, by US-101) and the little stream across the field's NW part, a broken line on the Madonna Inn Bike
+  // Path edge, the two natural=wood stands by the highway / Fernandez Lane, clumps on the scrub fringe W/SW of the Inn,
+  // and only a few lone oaks out on the open field
+  const W = (L) => L.map(([la, lo]) => llToWorld(la, lo));
+  const along = (L, step, p, side, opt) => {
+    const P = W(L);
+    for (let i = 1; i < P.length; i++) {
+      const ax = P[i - 1].x, az = P[i - 1].z, dx = P[i].x - ax, dz = P[i].z - az, len = Math.hypot(dx, dz);
+      for (let d = R() * step; d < len; d += step * (0.7 + R() * 0.6)) {
+        if (R() > p) continue;
+        const o = (R() - 0.5) * 2 * side, x = ax + dx * d / len - dz / len * o, z = az + dz * d / len + dx / len * o;
+        if (R() < 0.25) grove(x, z, 2 + Math.floor(R() * 2), 12, opt);
+        else if (ok(x, z, opt.clear) && clearOf(x, z, opt.minD)) spots.push({ kind: 'oak', x, z, sc: lerp(opt.sc[0], opt.sc[1], R()), pri: R() < 0.5 ? opt.pri : opt.pri + 1 });
+      }
+    }
+  };
+  const inside = (P, x, z) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) if ((P[i].z > z) !== (P[j].z > z) && x < (P[j].x - P[i].x) * (z - P[i].z) / (P[j].z - P[i].z) + P[i].x) c = !c; return c; };
+  const wood = (L, n, opt) => {
+    const P = W(L), xs = P.map((q) => q.x), zs = P.map((q) => q.z), x0 = Math.min(...xs), x1 = Math.max(...xs), z0 = Math.min(...zs), z1 = Math.max(...zs);
+    for (let t = 0, k = 0; k < n && t < n * 60; t++) {
+      const x = lerp(x0, x1, R()), z = lerp(z0, z1, R());
+      if (!inside(P, x, z) || !ok(x, z, opt.clear) || !clearOf(x, z, opt.minD)) continue;
+      spots.push({ kind: 'oak', x, z, sc: lerp(opt.sc[0], opt.sc[1], R()), pri: k < n / 2 ? opt.pri : opt.pri + 1 }); k++;
+    }
+  };
+  const rip = { minD: 9, clear: 9, sc: [0.85, 1.3], pri: 2 };
+  for (const L of OSM_TREES.creek) along(L, 26, 0.75, 10, rip);
+  for (const L of OSM_TREES.stream) along(L, 30, 0.6, 8, rip);
+  for (const L of OSM_TREES.path) along(L, 45, 0.4, 6, { minD: 10, clear: 12, sc: [0.8, 1.15], pri: 2 });
+  for (const L of OSM_TREES.wood) wood(L, 10, { minD: 8.5, clear: 9, sc: [0.85, 1.3], pri: 1 });
+  for (const L of OSM_TREES.scrub) along(L, 70, 0.6, 30, { minD: 9, clear: 20, sc: [0.75, 1.15], pri: 3 });
+  // a few lone oaks out on the open field
+  for (let t = 0, n = 0; n < 8 && t < 3000; t++) {
+    const x = -220 + R() * 340, z = -120 + R() * 560;
+    if (!ok(x, z, 26) || !clearOf(x, z, 30)) continue;
     spots.push({ kind: 'oak', x, z, sc: 0.85 + R() * 0.45, pri: 3 }); n++;
   }
   return spots.filter((t) => bunkerDist(t.x, t.z) > 3);
