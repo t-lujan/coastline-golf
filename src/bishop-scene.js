@@ -46,7 +46,7 @@ const bsearch = (arr, v) => { let lo = 0, hi = arr.length - 2; while (lo < hi) {
 // what a patch of hillside is covered with, from its real elevation, slope, aspect and whether it sits in a draw
 const COL = {
   gold0: [0.55, 0.5, 0.22], gold1: [0.66, 0.61, 0.3], green: [0.3, 0.34, 0.14], oak: [0.1, 0.13, 0.06], chap: [0.22, 0.25, 0.15],
-  scrub: [0.24, 0.3, 0.22], field0: [0.32, 0.42, 0.14], field1: [0.42, 0.48, 0.18], rough: [0.29, 0.37, 0.13],
+  scrub: [0.13, 0.17, 0.1], field0: [0.29, 0.42, 0.14], field1: [0.37, 0.47, 0.17], rough: [0.29, 0.37, 0.13],
   rock: [0.34, 0.26, 0.17], rock2: [0.43, 0.34, 0.22], lichen: [0.42, 0.32, 0.17], joint: [0.2, 0.18, 0.15], town: [0.3, 0.32, 0.22],
 };
 // the real land cover round the Inn (OSM): the farmland the hole sits in, the pasture round the Inn, grassland at Cerro's foot
@@ -74,9 +74,10 @@ export function landColor(x, z, out) {
   const chap = Math.max(sstep(0.66, 0.72, slope * 0.7 + n2 * 0.45 + north * 0.15 + (n3 - 0.5) * 0.25) * sstep(130, 200, elev),
     morro * sstep(170, 230, elev + n2 * 60) * sstep(0.35, 0.5, n2 + n3 * 0.3 + north * 0.2));
   mix3(out, COL.chap, chap * (1 - oak) * 0.9);
-  // fall green-grey scrub (coyote brush, sage, chaparral) on the hills: a noise mask, denser on the steep and north faces
-  const scrub = sstep(0.5, 0.6, n3 * 0.6 + n2 * 0.4 + slope * 0.5 + north * 0.18 * sstep(0.05, 0.2, slope)) * sstep(0.06, 0.16, slope) * (1 - oak);
-  mix3(out, COL.scrub, scrub * 0.85);
+  // fall scrub (coyote brush, sage, chaparral) on the hills: a dark olive, much darker than the dry grass so it still reads
+  // under a warm low sun; a noise mask, denser on the steep and north faces
+  const scrub = sstep(0.46, 0.56, n3 * 0.6 + n2 * 0.4 + slope * 0.5 + north * 0.18 * sstep(0.05, 0.2, slope)) * sstep(0.06, 0.16, slope) * (1 - oak);
+  mix3(out, COL.scrub, scrub * 0.9);
   // the valley floor: irrigated farmland and cattle pasture, muted green-gold; the rough along the hole a darker, greener grass
   const flat = (1 - sstep(88, 115, elev)) * (1 - sstep(0.07, 0.15, slope)), farm = Math.max(flat * 0.85, rectIn(FARM_R, x, z, 60) * (1 - sstep(0.1, 0.2, slope)));
   const fc = [COL.field0[0], COL.field0[1], COL.field0[2]]; mix3(fc, COL.field1, Math.min(1, n2 * 0.8 + n3 * 0.4));
