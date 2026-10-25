@@ -34,7 +34,8 @@ const LM_DEF = {
   hollister:{ lat: 35.34396, lon: -120.78636, elev: 430 },
   // the white "M" (Mission College Prep) on the east face of Cerro San Luis, at the OSM node for the M itself
   // (historic=memorial name=M, 35.28237, -120.67465)
-  m:        { lat: 35.28237, lon: -120.67465, elev: 238 },
+  // nudged ~34 m south-west from its real OSM position (35.28237, -120.67465) so it is visible from the hole
+  m:        { lat: 35.28213, lon: -120.67489, elev: 238 },
 };
 export const LM = {};
 for (const [k, v] of Object.entries(LM_DEF)) LM[k] = { ...v, ...llToWorld(v.lat, v.lon) };
