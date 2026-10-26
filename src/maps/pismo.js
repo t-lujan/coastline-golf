@@ -10,7 +10,8 @@
 //   Pismo Creek mouth (35.12867, -120.63924)            a 1179 → 170
 //   Grand Ave ramp, Grover Beach (35.1221, -120.6345)   a 2003 → 290
 //   Pier Ave ramp, Oceano (35.1056, -120.6305)          a 3864 → 455
-//   foredunes at the green (35.1040, -120.6292)         a 3990 → 488, then true scale again past ~a 3990 (the green and the dunes)
+//   foredunes at the green (35.1040, -120.6292)         a 3990 → 488, then true scale again past ~a 3990 (the dunes). The green sits ~45 m past that mark (s≈533, real a≈4035, ~45 m
+//   south of 35.1040,-120.6292, still in the Oceano foredunes) so the hole plays ~583 yd and is not a two-shotter in calm air
 // i.e. the ~3.9 km of beach between the pier and the dunes is squeezed ~8x on average (~10x between the creek and Pier Ave),
 // north of the pier and inland it is true. Across the beach the game keeps the real widths measured from the local
 // mean-high-water line (backshore ~110-160 m dry, a ~30 m swash band) rather than the real MHW offsets, so the gentle real
@@ -67,25 +68,26 @@ const shoreD = (x, z) => shoreX(z) - x;
 
 // ---------- the hole ----------
 export const BOUNDS = { minX: -560, maxX: 560, minZ: -820, maxZ: 340 };
-export const PAINT = { minX: -110, maxX: 80, minZ: -575, maxZ: 10 };
-export const FAIRWAY = [[25, -42], [22, -150], [8, -300], [-2, -395], [-8, -432], [-30, -472], [-46, -497]];
+export const PAINT = { minX: -110, maxX: 80, minZ: -620, maxZ: 10 };
+export const FAIRWAY = [[25, -42], [22, -150], [8, -300], [-2, -395], [-8, -432], [-30, -472], [-46, -497], [-62, -523], [-72, -540]];
 export const FAIRWAY_HALF = 15;
 export const CORNER = { x: -8, z: -432 };
-export const GREEN = { x: -56, z: -511, rx: 15, rz: 13 };
-export const CUP = { x: -62, z: -520 };
+export const GREEN = { x: -70, z: -533, rx: 15, rz: 13 };
+export const CUP = { x: -76, z: -542 };
 // the first shot aims down the beach (the green is round the bend to the left)
 export const AIM_VIA = { x: 9, z: -290, until: 300 };
 // Pismo Creek: crosses the beach from the lagoon behind it to the surf at the compressed creek-mouth mark
 export const CREEK = { s: 170, halfW: 12.5, inX: -150 };
 export const BUNKERS = [
   { x: -3, z: -272, r: 6.6, face: 1.1, from: [25, -32] },                     // fairway, left (~260 yd from the tee)
-  { x: GREEN.x + 17, z: GREEN.z + 4, r: 5.0, face: 0.55, from: [-20, -470] },   // greenside pot, right (seaward)
-  { x: GREEN.x - 14, z: GREEN.z - 10, r: 4.6, face: 0.45, from: [-20, -470] },  // greenside pot, back left
+  { x: -10, z: -462, r: 5.4, face: 0.9, from: [-8, -432] },                      // second-shot zone, right (~100 yd short of the green)
+  { x: GREEN.x + 17, z: GREEN.z + 4, r: 5.0, face: 0.55, from: [-34, -492] },   // greenside pot, right (seaward)
+  { x: GREEN.x - 14, z: GREEN.z - 10, r: 4.6, face: 0.45, from: [-34, -492] },  // greenside pot, back left
 ];
 export const WASTE = { x: 9999, z: 9999, ax: 0, len: 1, half: 1 };   // the whole beach is waste; no separate waste strip
 export const wasteDist = () => 1e9;
 export const PAR = 5;
-const corridorY = (z) => { const s = -z; return 4.3 + 0.35 * Math.sin(s * 0.028) * sstep(40, 120, s) + GREEN_RISE * sstep(415, 500, s); };
+const corridorY = (z) => { const s = -z; return 4.3 + 0.35 * Math.sin(s * 0.028) * sstep(40, 120, s) + GREEN_RISE * sstep(440, 525, s); };
 // the green sits up on a foredune shelf: the last ~80 m of fairway climbs onto it, so a running approach checks up
 const GREEN_RISE = 5.5;
 const beachAt = (x, z) => { const d = shoreD(x, z); return d < 0 ? Math.max(-9, d * 0.07 - 0.15) : d < 30 ? d * 0.047 : 1.41 + (d - 30) * 0.032; };
