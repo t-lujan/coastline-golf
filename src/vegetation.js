@@ -654,8 +654,8 @@ const KINDS = {
   cyp: { geos: [() => cypressGeometry(13)], far: () => cypressGeometry(13, { far: true }), h: 8, sway: 0.2, shadow: 5.5, holes: 0.3 },
 };
 
-export function createTrees(level = 'high') {
-  const R = rng(5), spots = (MAP_ID === 'bishop' ? treeSpotsBishop() : treeSpots()).sort((a, b) => a.pri - b.pri);
+export function createTrees(level = 'high', custom = null) {
+  const R = rng(5), spots = (custom || (MAP_ID === 'bishop' ? treeSpotsBishop() : treeSpots())).sort((a, b) => a.pri - b.pri);
   // prevailing NW wind: crowns sheared toward the south-east
   const lean = (135 - HEADING) * Math.PI / 180, dx = Math.sin(lean), dz = -Math.cos(lean), down = Math.atan2(-dz, dx);
   const g = new THREE.Group(), meshes = [], q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();

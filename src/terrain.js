@@ -24,6 +24,9 @@ const PALETTES = {
         vec3 col = mix(rough, hills, smoothstep(10.0, 30.0, hgt + nz * 8.0));` },
   // dry golden grass (straw and tan, greener in the swales), olive chaparral on the steep banks; height-agnostic, the
   // valley floor tilts. The fairway fades out through a first cut and a band of semi-rough instead of a hard edge.
+  pismo: { sand: PISMO_SAND, ground: `vec3 rough = mix(vec3(0.085, 0.17, 0.035), vec3(0.15, 0.24, 0.055), nz);
+        rough = mix(rough, vec3(0.30, 0.25, 0.09), smoothstep(0.55, 0.8, nB + nF * 0.2) * 0.55);
+        vec3 col = rough;` },
   inland: { ground: `vec3 rough = mix(vec3(0.47, 0.36, 0.19), vec3(0.61, 0.48, 0.28), nz) * (0.86 + nG * 0.2) * (0.9 + 0.2 * cgN2(vec2(p.x * 1.7, p.y * 5.3) + nF));
         rough = mix(rough, vec3(0.28, 0.3, 0.13), smoothstep(0.58, 0.85, nB + nF * 0.25) * 0.4);
         vec3 col = rough;
@@ -92,6 +95,47 @@ export function bakeDepth(res = 256, hasRock = true) {
   return tex;
 }
 
+// Pismo's beach (style 'pismo'): pale buff/cream dry sand with wind ripples and tone drift on the dunes, a darker glossy
+// wet band over the ~30 m swash face (h 0..~1.4 m), a thin bright foam line at the waterline and an animated swash edge
+// that runs up and down the wet sand. The same band thresholds drive pismoSandTransect() for the tests.
+export const TERRAIN_TIME = { value: 0 };
+const PS = { dry: [0.80, 0.72, 0.56], dry2: [0.88, 0.81, 0.65], wet: [0.40, 0.34, 0.25], foam: [0.90, 0.91, 0.88], wetTop: 1.42, foamH: 0.1 };
+const v3 = (c) => `vec3(${c.map((v) => v.toFixed(3)).join(', ')})`;
+const PISMO_SAND = `vec3 sandC = mix(${v3(PS.dry)}, ${v3(PS.dry2)}, nz) * (0.93 + nG * 0.1);
+        // dry sand: wind ripples (crests across the NW wind) and slow tone drift over the dunes
+        float rip = sin(dot(p, vec2(0.42, 0.91)) * 4.2 + nM * 7.0 + nF * 1.5) * 0.5 + 0.5;
+        sandC *= 0.95 + 0.08 * rip * smoothstep(1.6, 2.6, hgt);
+        sandC = mix(sandC, sandC * vec3(0.93, 0.9, 0.85), smoothstep(0.45, 0.8, nB) * smoothstep(3.0, 6.0, hgt));
+        // wet band over the swash face, darker the lower it lies, with a fresh swash film running up and down it
+        float wetK = 1.0 - smoothstep(${PS.wetTop - 0.12}, ${PS.wetTop + 0.12}, hgt + (nM - 0.5) * 0.25);
+        vec3 wetC = ${v3(PS.wet)} * (0.94 + nF * 0.1) * mix(1.12, 0.92, smoothstep(1.2, 0.2, hgt));
+        float run = 0.32 + 0.26 * sin(uTime * 0.42 + p.y * 0.011 + nB * 4.0) + 0.12 * sin(uTime * 1.13 + p.y * 0.031);
+        float film = smoothstep(run + 0.04, run - 0.04, hgt);
+        wetC = mix(wetC, wetC * vec3(0.82, 0.86, 0.9), film);
+        vec3 sc = mix(sandC, wetC, wetK);
+        // the swash edge (a broken lacy foam line) and a thin bright foam line at the waterline
+        float edge = smoothstep(0.07, 0.0, abs(hgt - run)) * smoothstep(0.35, 0.6, nF + cgN2(p * 0.7 + uTime * 0.2) * 0.4);
+        float lineK = smoothstep(${PS.foamH * 1.6}, ${PS.foamH * 0.4}, hgt) * smoothstep(-0.12, 0.0, hgt);
+        sc = mix(sc, ${v3(PS.foam)} * (0.92 + nF * 0.08), max(edge * 0.85, lineK * 0.9));
+        gWet = wetK * (1.0 - lineK);
+        vec3 floorC = vec3(0.36, 0.32, 0.24);
+        sc = mix(sc, floorC, smoothstep(-0.1, -1.2, hgt));`;
+const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const lum = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+const mixc = (a, b, k) => a.map((v, i) => v + (b[i] - v) * k);
+// static paint of the Pismo beach (no noise, no swash film) along a transect across the beach at z
+export function pismoSandTransect(z = -120, shoreX = null) {
+  const out = [];
+  for (let d = -6; d <= 80; d += 2) {
+    const x = (shoreX ? shoreX(z) : 0) - d, h = heightAt(x, z);
+    const dry = mixc(PS.dry, PS.dry2, 0.5), wetK = 1 - ss(PS.wetTop - 0.12, PS.wetTop + 0.12, h);
+    let c = mixc(dry, PS.wet.map((v) => v * (0.99 * (1.12 + (0.92 - 1.12) * ss(1.2, 0.2, h)))), wetK);
+    const lineK = ss(PS.foamH * 1.6, PS.foamH * 0.4, h) * ss(-0.12, 0, h); c = mixc(c, PS.foam, lineK * 0.9);
+    out.push({ d, h: +h.toFixed(2), lum: +lum(c).toFixed(3), band: lineK > 0.5 ? 'foam' : wetK > 0.5 ? 'wet' : 'dry' });
+  }
+  return out;
+}
+
 // baked ambient occlusion from the height field: hollows and the feet of slopes get darker
 function bakeAO(x, z, h) {
   let occ = 0;
@@ -126,7 +170,7 @@ export function createTerrain({ segX, segZ, paintRes, bounds = BOUNDS, paint: pa
   const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   if (offset) { mat.polygonOffset = true; mat.polygonOffsetFactor = -offset; mat.polygonOffsetUnits = -4 * offset; }
   mat.onBeforeCompile = (sh) => {
-    sh.uniforms.uPaint = { value: paint };
+    sh.uniforms.uPaint = { value: paint }; if (PL.sand) sh.uniforms.uTime = TERRAIN_TIME;
     sh.uniforms.uPaintB = { value: new THREE.Vector4(PAINT.minX, PAINT.minZ, PAINT.maxX - PAINT.minX, PAINT.maxZ - PAINT.minZ) };
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>\nattribute float aSand; attribute float aAO; varying float vSand; varying float vAO; varying vec3 vWP;${baseColor ? '\nattribute vec3 aBase; varying vec3 vBase;' : ''}`)
@@ -136,7 +180,7 @@ export function createTerrain({ segX, segZ, paintRes, bounds = BOUNDS, paint: pa
         ${GLSL_NOISE}
         uniform sampler2D uPaint; uniform vec4 uPaintB; varying float vSand; varying float vAO; varying vec3 vWP;${baseColor ? ' varying vec3 vBase;' : ''}
         float edgeS(float d, float soft){ float w = fwidth(d) + soft; return 1.0 - smoothstep(-w, w, d); }
-        float gTurf; float gSandK;`)
+        float gTurf; float gSandK; float gWet = 0.0;${PL.sand ? '\n        uniform float uTime;' : ''}`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         vec2 p = vWP.xz; float hgt = vWP.y;
         float nB = cgN2(p * 0.018), nM = cgN2(p * 0.11), nF = cgN2(p * 0.9), nG = cgN2(p * 3.1);
@@ -144,11 +188,11 @@ export function createTerrain({ segX, segZ, paintRes, bounds = BOUNDS, paint: pa
         // rough: deep coastal green with patches of dry golden grass
         ${baseColor && PL.groundBase ? PL.groundBase : PL.ground}
         // beach sand: warm, darker and wet near the water, sea floor below
-        vec3 sandC = mix(vec3(0.62, 0.48, 0.30), vec3(0.74, 0.60, 0.40), nz) * (0.92 + nG * 0.12);
+        ${PL.sand || `vec3 sandC = mix(vec3(0.62, 0.48, 0.30), vec3(0.74, 0.60, 0.40), nz) * (0.92 + nG * 0.12);
         vec3 wet = vec3(0.33, 0.26, 0.17), floorC = vec3(0.30, 0.27, 0.19);
-        float s = smoothstep(0.32, 0.62, vSand + (nz - 0.5) * 0.35);
         vec3 sc = mix(sandC, wet, smoothstep(0.9, 0.15, hgt));
-        sc = mix(sc, floorC, smoothstep(0.0, -1.2, hgt));
+        sc = mix(sc, floorC, smoothstep(0.0, -1.2, hgt));`}
+        float s = smoothstep(0.32, 0.62, vSand + (nz - 0.5) * 0.35);
         // dune grass fringe where sand meets turf
         vec3 duneGrass = mix(vec3(0.24, 0.26, 0.09), vec3(0.36, 0.33, 0.14), nF);
         col = mix(col, duneGrass, smoothstep(0.2, 0.42, vSand) * (1.0 - s));
@@ -178,6 +222,12 @@ export function createTerrain({ segX, segZ, paintRes, bounds = BOUNDS, paint: pa
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
         float bmp = (cgN2(vWP.xz * 1.6) * 0.6 + cgN2(vWP.xz * 5.0) * 0.4) * (1.0 - gTurf * 0.85) + gSandK * cgN2(vec2(vWP.x * 2.0, vWP.z * 9.0)) * 0.5;
         normal = cgBump(normal, -vViewPosition, bmp, 0.12);`);
+    if (PL.sand) sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        // wet sand is glossy: a fresnel sheen of the sky haze over the swash face
+        #ifdef USE_FOG
+        float fres = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 4.0);
+        totalEmissiveRadiance += fogColor * gWet * gSandK * (0.06 + 0.5 * fres);
+        #endif`);
   };
   const mesh = new THREE.Mesh(geo, mat); mesh.receiveShadow = true;
   return { mesh, paint };

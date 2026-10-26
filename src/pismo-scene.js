@@ -41,6 +41,7 @@ const AX = (PIER_B.x - PIER_A.x) / PIER_LEN, AZ = (PIER_B.z - PIER_A.z) / PIER_L
 const toTS = (x, z) => ({ t: (x - PIER_A.x) * AX + (z - PIER_A.z) * AZ, s: (x - PIER_A.x) * AZ - (z - PIER_A.z) * AX });
 const fromTS = (t, s) => ({ x: PIER_A.x + AX * t + AZ * s, z: PIER_A.z + AZ * t - AX * s });
 const DECK0 = heightAt(PIER_A.x, PIER_A.z) + 3.0, DECK1 = WATER_LEVEL + 6.6;
+export const PIER_AXIS = { ax: PIER_A.x, az: PIER_A.z, bx: PIER_B.x, bz: PIER_B.z };
 const deckY = (t) => DECK0 + (DECK1 - DECK0) * Math.min(1, Math.max(0, t / PIER_LEN));
 
 function plankTexture() {

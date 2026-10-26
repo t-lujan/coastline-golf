@@ -12,6 +12,8 @@ export function createWater({ depthTex, bounds, segments, size = 7000 }) {
     uDepth: { value: depthTex }, uBounds: { value: new THREE.Vector4(bounds.minX, bounds.minZ, bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) },
     uFogColor: { value: new THREE.Color() }, uFogDensity: { value: 0.001 }, uNight: { value: 0 }, uWind: { value: new THREE.Vector2(1, 0) }, uLow: { value: 0 },
     uRock: { value: new THREE.Vector4(ROCK.x, ROCK.z, ROCK.rx * 1.15, ROCK.rz * 1.15) }, uRockH: { value: ROCK.h * 1.04 }, uRockCol: { value: new THREE.Color(0.1, 0.1, 0.1) },
+    // Pismo: a wide surf zone of breaking bands (uBreak) and foam round the pier pilings (uPier: landward x/z, seaward x/z)
+    uBreak: { value: 0 }, uPier: { value: new THREE.Vector4(1e5, 1e5, 1e5 + 1, 1e5) },
   };
   const mat = new THREE.ShaderMaterial({
     uniforms,
@@ -26,7 +28,7 @@ export function createWater({ depthTex, bounds, segments, size = 7000 }) {
       }`,
     fragmentShader: /* glsl */`
       uniform float uTime, uSurf, uCalm, uSunI, uFogDensity, uNight, uLow; uniform vec3 uSunDir, uSunCol, uZen, uHor, uDeep, uMid, uShallow, uSandy, uFogColor;
-      uniform sampler2D uDepth; uniform vec4 uBounds; uniform vec2 uWind; uniform vec4 uRock; uniform float uRockH; uniform vec3 uRockCol;
+      uniform sampler2D uDepth; uniform vec4 uBounds; uniform vec2 uWind; uniform vec4 uRock; uniform float uRockH; uniform vec3 uRockCol; uniform float uBreak; uniform vec4 uPier;
       varying vec3 vW; varying float vDepthV;
       ${GLSL_NOISE}
       // Morro Rock as an ellipsoid: it hides the sun glitter behind it and shows up in the reflection
@@ -100,6 +102,25 @@ export function createWater({ depthTex, bounds, segments, size = 7000 }) {
         float lip = smoothstep(0.5, 0.04, depth + (fn - 0.5) * 0.3);
         float lace = smoothstep(0.45, 0.75, cgN2(vW.xz * 2.2 + uTime * 0.3)) * smoothstep(1.2, 0.2, depth);
         float foam = clamp(max(max(band * 0.85, lip), lace * 0.45) * (0.55 + 0.65 * fn), 0.0, 1.0) * inside * uSurf;
+        if (uBreak > 0.5) {
+          // the WNW swell breaking on Pismo's gentle bar: 2-4 white-water lines parallel to the beach rolling shoreward
+          // (and a little down the coast), each a sharp breaking lip with a broken foam trail behind it, out to ~5.5 m deep
+          float br = (depth * 3.9 + vW.z * 0.012 + uTime * 1.25 + fn * 1.8) / 6.2832;
+          float bp = fract(br), crest = fract(floor(br) * 0.618);
+          float lipB = smoothstep(0.0, 0.035, bp) * (1.0 - smoothstep(0.035, 0.12, bp));
+          float trail = (1.0 - smoothstep(0.1, 0.55, bp)) * smoothstep(0.35, 0.7, cgN2(vW.xz * vec2(0.5, 0.18) + uTime * 0.2) + fn * 0.3);
+          float zone = smoothstep(5.8, 3.6, depth) * smoothstep(0.0, 0.5, depth) * (0.55 + 0.45 * crest);
+          float whiteW = clamp(max(lipB, trail * 0.65) * zone * smoothstep(0.25, 0.55, fn + 0.2), 0.0, 1.0);
+          // inner white water: a bubbly sheet over the last ~25 m to the swash
+          float sheet = smoothstep(1.8, 0.4, depth) * smoothstep(0.4, 0.75, cgN2(vW.xz * 0.8 - uTime * vec2(0.3, 0.1)) * 0.7 + fn * 0.4);
+          // foam round the pier pilings: rows every 6 m along the pier, across the deck width, where the surf runs
+          vec2 pa = uPier.xy, pd = uPier.zw - uPier.xy; float pl = length(pd); pd /= pl;
+          vec2 rel = vW.xz - pa; float pt = dot(rel, pd), ps = rel.x * pd.y - rel.y * pd.x;
+          float row = abs(fract((pt - 3.0) / 6.0 + 0.5) - 0.5) * 6.0;
+          float pier = smoothstep(1.4, 0.2, row) * smoothstep(7.5, 5.0, abs(ps - 2.0)) * step(0.0, pt) * step(pt, pl)
+            * smoothstep(0.35, 0.65, cgN2(vW.xz * 1.6 + uTime * 0.5)) * mix(0.35, 1.0, smoothstep(6.0, 2.0, depth));
+          foam = max(foam, max(max(whiteW, sheet * 0.55), pier * 0.8) * inside * uSurf);
+        }
         vec3 foamC = vec3(0.92, 0.96, 0.97) * mix(1.0, 0.22, uNight) * (0.55 + 0.25 * uSunI / 3.0 + 0.25);
         col = mix(col, foamC, foam * 0.9);
         float f = 1.0 - exp(-pow(uFogDensity * vDepthV, 2.0));

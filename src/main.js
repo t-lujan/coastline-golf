@@ -9,7 +9,7 @@ import { sunPosition, sceneDate, laClock, lookFor } from './sun.js';
 import { getWeather, compass, windVector } from './weather.js';
 import { createSky } from './sky.js';
 import { createWater } from './water.js';
-import { createTerrain, createHills, bakeDepth } from './terrain.js';
+import { createTerrain, createHills, bakeDepth, TERRAIN_TIME, pismoSandTransect } from './terrain.js';
 import { createStacks, createFlag, createTeeMarkers, createTeePeg, createBall, createGulls } from './props.js';
 import { createRock } from './rock.js';
 import { windUniforms, leafUniforms, createGrass, createTrees, createShrubs, createFlowers, createIcePlant, createBeachRocks, createDriftwood, lodScatter } from './vegetation.js';
@@ -18,7 +18,8 @@ import { rimUniforms, tameUniforms } from './noise.js';
 import { Ball, BALL_R, CLUBS, SURF, DT, predict, flatPuttDist } from './physics.js';
 import { Ribbon, groundLine, createMarker, Particles, puff, confetti } from './fx.js';
 import { QUALITY, createPost } from './post.js';
-import { createPismoScene, setPismoNight } from './pismo-scene.js';
+import { createPismoScene, setPismoNight, PIER_AXIS } from './pismo-scene.js';
+import { plantGrass, plantIce, plantScrub, plantStats, townTreeSpots, createPismoBackdrop } from './pismo-veg.js';
 import { Audio } from './audio.js';
 
 const params = new URLSearchParams(location.search);
@@ -104,7 +105,7 @@ async function build() {
     ? { corridor: { minX: -50, maxX: 235, minZ: -125, maxZ: 330 }, green: { minX: GREEN.x - 32, maxX: GREEN.x + 32, minZ: GREEN.z - 28, maxZ: GREEN.z + 30 } }
     : PISMO ? { corridor: { minX: -95, maxX: 65, minZ: -548, maxZ: -10 }, green: { minX: GREEN.x - 32, maxX: GREEN.x + 32, minZ: GREEN.z - 28, maxZ: GREEN.z + 30 } }
     : { corridor: { minX: -60, maxX: 80, minZ: -178, maxZ: 232 }, green: { minX: -28, maxX: 32, minZ: -165, maxZ: -115 } };
-  const style = BISHOP ? 'inland' : 'coast';
+  const style = BISHOP ? 'inland' : PISMO ? 'pismo' : 'coast';
   // Bishop's outer ground is mostly rough beyond the corridor patch (the real hills carry the detail): a lighter grid
   const tk = BISHOP ? 0.76 : 1;
   const baseColor = BISHOP ? landColor : null;
@@ -122,12 +123,16 @@ async function build() {
     const u = W0.water.uniforms; u.uSurf.value = 0; u.uCalm.value = 0.28; u.uRock.value.set(1e5, 1e5, 1, 1); u.uRockH.value = 1;
     u.uDeep.value.set('#1c3a2c'); u.uMid.value.set('#2d5a3c'); u.uShallow.value.set('#58804a'); u.uSandy.value.set('#8a9358');
   } else W0.water = createWater({ depthTex, bounds: BOUNDS, segments: qLevel === 'high' && touch ? 110 : L.water });
+  if (PISMO) {
+    // a wider surf zone of rolling white-water lines from the WNW swell, and a little foam round the pier pilings
+    const u = W0.water.uniforms; u.uBreak.value = 1; u.uPier.value.set(PIER_AXIS.ax, PIER_AXIS.az, PIER_AXIS.bx, PIER_AXIS.bz);
+  }
   scene.add(W0.water.mesh);
   W0.sky = createSky(); scene.add(W0.sky.mesh);
   if (BISHOP) {
     W0.backdrop = createBackdrop(qLevel === 'high' && !touch ? 'high' : qLevel === 'low' ? 'low' : 'med'); scene.add(W0.backdrop);
     scene.add(createFarOaks(qLevel === 'high' ? (touch ? 2400 : 5000) : qLevel === 'med' ? 1700 : 1000, W0.backdrop.userData.surfaceY, qLevel === 'low' ? 0 : qLevel === 'high' && !touch ? 600 : 260));
-  } else scene.add(createHills());
+  } else if (PISMO) { W0.backdrop = createPismoBackdrop(); scene.add(W0.backdrop); } else scene.add(createHills());
   await loadStep(BISHOP ? 'Raising Bishop Peak' : PISMO ? 'Raising the Oceano Dunes' : 'Raising Morro Rock', 0.35);
   if (BISHOP) {
     const knobs = createBishopKnobs(qLevel === 'high' && !touch ? 2 : 1); W0.crest = knobs.userData.crest; W0.rock = knobs; scene.add(knobs);
@@ -168,12 +173,17 @@ async function build() {
   if (BISHOP) {
     W0.scatter = { grass: createDryGrass(touch ? 9000 : 20000, touch ? 650 : 1000), rocks: createGranite(touch ? 240 : 420), shrubs: createChaparral(touch ? 700 : 1100, W0.backdrop.userData.surfaceY) };
     W0.reach = { grass: 1, rocks: 1.8, shrubs: 1.8 };
+  } else if (PISMO) {
+    // the shared coastal instancers re-planted on Pismo's dunes (pismo-veg.js); no beach rocks or meadow flowers on this sand
+    const ng = touch ? 9000 : 20000, ni = touch ? 1400 : 2600, ns = touch ? 700 : 1100;
+    W0.scatter = { grass: plantGrass(createGrass(ng, 0), ng), ice: plantIce(createIcePlant(ni), ni), shrubs: plantScrub(createShrubs(ns), ns), drift: createDriftwood(40) };
+    W0.reach = { grass: 1, ice: 1.4, shrubs: 1.7, drift: 1.6 };
   } else {
     W0.scatter = { grass: createGrass(touch ? 9000 : 20000, touch ? 650 : 1000), flowers: createFlowers(touch ? 2600 : 5000), ice: createIcePlant(touch ? 1400 : 2600), rocks: createBeachRocks(touch ? 260 : 420), drift: createDriftwood(40), shrubs: createShrubs(touch ? 700 : 1100) };
     W0.reach = { grass: 1, flowers: 0.8, ice: 1.4, rocks: 1.6, drift: 1.6, shrubs: 1.7 };
   }
   for (const m of Object.values(W0.scatter)) { lodScatter(m); scene.add(m); }
-  W0.trees = createTrees(qLevel); scene.add(W0.trees);
+  W0.trees = createTrees(qLevel, PISMO ? townTreeSpots() : null); scene.add(W0.trees);
   // ball, effects
   W0.ballMesh = createBall(); scene.add(W0.ballMesh);
   W0.tracer = new Ribbon(260, 0xf2fbfa, 0.6, 0.003, 0.016); scene.add(W0.tracer.mesh);
@@ -928,7 +938,7 @@ function frame(now) {
 }
 function update(rdt) {
   const dt = rdt * G.timeScale; elapsed += rdt;
-  windUniforms.uTime.value = elapsed; W0.water.uniforms.uTime.value = elapsed; W0.sky.uniforms.uTime.value = elapsed; W0.flag.uniforms.uTime.value = elapsed;
+  windUniforms.uTime.value = elapsed; W0.water.uniforms.uTime.value = elapsed; TERRAIN_TIME.value = elapsed; W0.sky.uniforms.uTime.value = elapsed; W0.flag.uniforms.uTime.value = elapsed;
   W0.gulls.userData.update(elapsed); W0.boats.userData.update(elapsed);
   W0.wisps.uniforms.uTime.value = elapsed; W0.mist.uniforms.uTime.value = elapsed;
   // the pin is pulled on hole-out so the flagstick never blocks the celebration shot
@@ -1233,6 +1243,7 @@ if (TEST) {
     W0, surfY: () => W0.backdrop && W0.backdrop.userData.surfaceY, camera,
     probe: TEST && BISHOP ? { fairwayDist, llToWorld: bishop.llToWorld } : null,
     get pismo() { return PISMO ? W0.pismoInfo || null : null; },
+    get pismoNature() { return PISMO ? { plants: plantStats(), clear: { fairway: pismo.FAIRWAY_HALF + 3, tee: 6, green: 6 }, trees: W0.trees.userData.spots.map((t) => ({ kind: t.kind, x: +t.x.toFixed(1), z: +t.z.toFixed(1), t: +(pismo.toeX(t.z) - t.x).toFixed(1) })), backdrop: W0.backdrop.userData.features, backdropCalls: 1, surf: { break: W0.water.uniforms.uBreak.value, pier: W0.water.uniforms.uPier.value.toArray() }, sand: pismoSandTransect(-120, pismo.shoreX) } : null; },
     TEE, CUP, bunkers: BUNKERS, pond: BISHOP ? bishop.POND : null, aimVia: AIM_VIA, heightAt,
     // Bishop Peak scene facts for the tests: the M draped on the hillside, the real-elevation heightmaps, the Inn's placement
     bishopCheck: () => {
