@@ -2,6 +2,7 @@
 // railings, lamp posts), the "PISMO BEACH" arch at the head of the pier, the town by the pier from the OSM building
 // footprints, and lifeguard towers down the beach. Everything is merged / instanced into a handful of draw calls; the lamp
 // heads, sign letters and windows glow at night from one shared night factor (setPismoNight, fed from applyLook).
+// Data: Pier outline, buildings and shoreline © OpenStreetMap contributors (ODbL); elevation: AWS Terrain Tiles (USGS 3DEP/SRTM).
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BOUNDS, TEE, WATER_LEVEL, FAIRWAY_HALF, heightAt, fairwayDist, teeDist } from './course.js';

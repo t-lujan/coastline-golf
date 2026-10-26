@@ -231,7 +231,7 @@ if (MAP_ID !== 'morro') {
   document.querySelector('#loader .sub').textContent = MAP.loaderSub; document.querySelector('#endcard .eyebrow').textContent = `Hole ${HOLE_NO} · ${MAP.name}`;
   document.getElementById('info-wx').innerHTML = `<b>Open-Meteo live weather</b> for ${MAP.place}: real wind pushes your ball, visibility thickens the ${BISHOP ? 'valley' : 'sea'} haze, cloud cover greys the sky.`;
   document.getElementById('info-sun').innerHTML = `<b>The real sun</b>: solar position over ${MAP.place} at the current California time sets the light, from morning haze to golden hour to moonlight.`;
-  document.getElementById('info-map').hidden = false; document.getElementById('info-map').innerHTML = PISMO ? '<b>Real-world mapping</b>: the hole runs from the Pismo Beach Pier down Pismo State Beach, across the Pismo Creek mouth, to the Oceano Dunes, laid out from OpenStreetMap and real elevation data (the beach between is shortened ~8x along the shore).' : '<b>Real-world mapping</b>: Bishop Peak, Cerro San Luis Obispo (and its "M"), the Madonna Inn and the Nine Sisters stand at their true bearings and distances, on real elevation data (Mapzen Terrain Tiles / AWS Open Data, including USGS 3DEP and SRTM).';
+  document.getElementById('info-map').hidden = false; document.getElementById('info-map').innerHTML = PISMO ? '<b>Real-world mapping</b>: the hole runs from the Pismo Beach Pier down Pismo State Beach, across the Pismo Creek mouth, to the Oceano Dunes, laid out from OpenStreetMap and real elevation data (the beach between is shortened ~8x along the shore).<br><small>Pier outline, buildings and shoreline © OpenStreetMap contributors (ODbL); elevation: AWS Terrain Tiles (USGS 3DEP/SRTM).</small>' : '<b>Real-world mapping</b>: Bishop Peak, Cerro San Luis Obispo (and its "M"), the Madonna Inn and the Nine Sisters stand at their true bearings and distances, on real elevation data (Mapzen Terrain Tiles / AWS Open Data, including USGS 3DEP and SRTM).';
 }
 
 // ---------- light, sky, fog from real time + weather ----------
@@ -386,7 +386,7 @@ function aimPose(club = G.club, yaw = G.yaw) {
   const ahead = putt ? Math.max(2.5, Math.min(7, distToCup())) : Math.min(130, Math.max(60, distToCup() * 0.6));
   // on Bishop Peak the tee view is turned a little left toward Cerro San Luis (~18° left of the aim line) and its M (~4° left)
   // so they sit in frame; a portrait frame turns ~8° so Cerro fits inside its left edge while the aim line stays well in view
-  const bias = BISHOP && onTee ? (camera.aspect > 1 ? 0.1 : 0.14) * ahead : 0;
+  const bias = BISHOP && onTee ? (camera.aspect > 1 ? 0.1 : 0.14) * ahead : PISMO && onTee ? -0.05 * ahead : 0;
   const lx = p.x + dx * ahead + dz * bias, lz = p.z + dz * ahead - dx * bias;
   const lk = new V3(lx, putt ? heightAt(lx, lz) : Math.max(onTee ? 0 : p.y, heightAt(lx, lz)) + 2.2 + ahead * 0.012, lz);
   return { pos, look: lk };
@@ -589,16 +589,24 @@ function buildFlyover() {
     return;
   }
   if (PISMO) {
-    // placeholder (a later job does the real pier -> dunes pan): from high over the dunes behind the green, round the flag
-    // and back up the beach (ocean on the left of the view) onto the tee aim view
+    // out at the end of the Pismo Pier (~10 m above the deck, ~22 m off its end), looking back along the deck at the town and
+    // the PISMO BEACH arch; a held beat (the path is clamped before its first key), then in over the deck, round onto the
+    // beach and SSE down the hole (over the tee, the creek mouth and the fairway) to the green in the Oceano dunes, flag held
+    // in frame, then a rising pull-back up the beach onto the tee aim view
+    const A = PIER_AXIS, L = Math.hypot(A.bx - A.ax, A.bz - A.az), ux = (A.bx - A.ax) / L, uz = (A.bz - A.az) / L;
+    const si = W0.pismoInfo && W0.pismoInfo.signPos, sx = si ? si.x : A.ax, sz = si ? si.z : A.az, sy = si ? si.top - 2 : 8;
+    const deck = W0.pismoInfo ? W0.pismoInfo.pierEnds[1].deck : 6.6;
     const keys = [
-      [0.0, -150, 70, -700, c.x, c.y, c.z],
-      [2.6, 40, 40, -600, c.x, c.y, c.z],
-      [5.0, 70, 30, -420, c.x + 10, c.y, c.z],
-      [8.0, 70, 26, -150, 10, 4, -330],
-      [10.6, e.x, e.y, e.z, l.x, l.y, l.z],
-    ].map(([t, ...r]) => [t * k, ...r]);
-    fly.path = keyPath(keys); fly.dur = keys[keys.length - 1][0];
+      [0.8, A.bx + ux * 22, deck + 10, A.bz + uz * 22, sx, sy - 6, sz],
+      [3.4, A.ax + ux * 170, deck + 22, A.az + uz * 170, sx - 30, 6, sz - 70],
+      [5.8, 55, 34, -10, 10, 4, -200],
+      [8.0, 30, 34, -150, -20, 4, -400],
+      [10.2, 5, 30, -420, c.x, c.y, c.z],
+      [11.6, -20, 24, -478, c.x, c.y, c.z],   // the dunes beat: green and flag ahead, the foredunes behind
+      [13.6, 25, 55, -330, c.x + 40, c.y, c.z + 160],
+      [15.4, e.x, e.y, e.z, l.x, l.y, l.z],
+    ];
+    fly.path = keyPath(keys); fly.dur = keys[keys.length - 1][0]; fly.keys = keys; fly.dunesT = 11.6;
     return;
   }
   // the heading only ever turns one way (from the Rock round to the fairway), the view tips down once onto the green
@@ -841,6 +849,7 @@ for (const b of document.querySelectorAll('#map-picker .map-choice')) {
     const u = new URL(location.href); u.searchParams.set('map', b.dataset.map); location.replace(u.toString());
   });
 }
+if (PISMO) document.querySelector('.load-art').innerHTML = '<circle class="load-sun" cx="196" cy="34" r="12" fill="#FFF3D6"/><path d="M6 62 L234 70 L234 74 L6 66 Z" fill="#E1F5F3" opacity=".95"/><g stroke="#E1F5F3" stroke-width="2.4" opacity=".9">' + Array.from({ length: 12 }, (_, i) => `<line x1="${14 + i * 19}" y1="${64 + i * 0.7}" x2="${14 + i * 19}" y2="104"/>`).join('') + '</g><g stroke="#E1F5F3" stroke-width="1.6" opacity=".8">' + Array.from({ length: 6 }, (_, i) => `<line x1="${30 + i * 38}" y1="${63 + i * 1.3}" x2="${30 + i * 38}" y2="${52 + i * 1.3}"/>`).join('') + '</g><g class="load-waves" stroke="#9ED8E0" stroke-width="3" fill="none" stroke-linecap="round"><path d="M4 100 q 10 -4 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0"/><path d="M4 110 q 10 -4 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0" opacity=".6"/></g>';
 if (BISHOP) document.querySelector('.load-art').innerHTML = '<defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E8D9A8"/><stop offset="1" stop-color="#8A7A3E"/></linearGradient></defs><circle class="load-sun" cx="188" cy="40" r="13" fill="#FFF3D6"/><path d="M8 96 L44 70 L58 52 L66 58 L82 30 L92 38 L104 22 L114 36 L124 34 L150 68 L182 84 L236 92 Z" fill="#E1F5F3" opacity=".95"/><path d="M130 96 L168 62 L176 66 L214 90 L236 92 L236 96 Z" fill="#E1F5F3" opacity=".5"/><g class="load-waves" stroke="url(#lg)" stroke-width="3" fill="none" stroke-linecap="round"><path d="M4 106 q 10 -4 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0 t 20 0"/></g>';
 
 // UI buttons
@@ -1298,6 +1307,14 @@ if (TEST) {
     freeCam: (...a) => { cam.free = a.length ? a : null; update(1 / 30); post.render(); },
     advance: (sec, step = 1 / 30) => { for (let t = 0; t < sec; t += step) update(step); post.render(); },
     flyAt: (sec) => { fly.t = sec; },
+    // the intro camera at time t: world points -> [ndcX, ndcY, in front?, distance]
+    flyProject: (t, pts) => {
+      if (!fly.path) buildFlyover();
+      const sc = solveCam, p = new V3(), l = new V3(), q = new V3(); fly.path(t, p, l);
+      sc.aspect = camera.aspect; sc.fov = baseFov; sc.near = 0.5; sc.far = 1e5; sc.updateProjectionMatrix(); sc.position.copy(p); sc.lookAt(l); sc.updateMatrixWorld(true);
+      return pts.map((w) => { q.set(...w).applyMatrix4(sc.matrixWorldInverse); const front = q.z < 0; q.set(...w).project(sc); return [q.x, q.y, front, p.distanceTo(new V3(...w))]; });
+    },
+    get flyDunesT() { return fly.dunesT; },
     // the intro path sampled at n even time steps: [x, y, z, lookX, lookY, lookZ, ground height under the camera]
     get flyKeys() { if (!fly.path) buildFlyover(); return fly.keys; },
     flyPath: (n = 240) => {
@@ -1312,7 +1329,8 @@ if (TEST) {
     // the opening pan (Bishop only): play it from the tee, hold it at a time, or read it
     playPan: () => { if (BISHOP) { G.yaw = aimYaw(); setClub(autoClub()); $('hud').hidden = true; startPan(); } return G.state; },
     // the landmarks in world space (summit / M height on the drawn terrain) and the clearance of the sightline to a point
-    lmWorld: () => BISHOP ? Object.fromEntries(Object.entries(bishop.LM).map(([k, v]) => [k, [v.x, k === 'm' || k === 'inn' ? heightAt(v.x, v.z) + 5 : bishop.yOf(v.elev, v.x, v.z), v.z]])) : null,
+    lmWorld: () => PISMO ? (() => { const i = W0.pismoInfo, e = i.pierEnds, c = cupPos();
+      return { pierEnd: [e[1].x, e[1].deck, e[1].z], pierBase: [e[0].x, e[0].deck, e[0].z], sign: [i.signPos.x, i.signPos.top - 1, i.signPos.z], cup: [c.x, c.y, c.z], flag: [CUP.x, heightAt(CUP.x, CUP.z) + 2.5, CUP.z] }; })() : BISHOP ? Object.fromEntries(Object.entries(bishop.LM).map(([k, v]) => [k, [v.x, k === 'm' || k === 'inn' ? heightAt(v.x, v.z) + 5 : bishop.yOf(v.elev, v.x, v.z), v.z]])) : null,
     sightline: (x, y, z) => { const c = camera.position; let m = 1e9; for (let i = 1; i < 194; i++) { const f = i / 200, px = c.x + (x - c.x) * f, pz = c.z + (z - c.z) * f; m = Math.min(m, c.y + (y - c.y) * f - heightAt(px, pz)); } return m; },
     get fov() { return camera.fov; },
     panAt: (sec) => { pan.t = sec; if (G.state === 'pan') applyPan(sec); }, panLift: (m) => { pan.up = m; pan.legs = null; }, heightAt,
