@@ -18,6 +18,7 @@ import { rimUniforms, tameUniforms } from './noise.js';
 import { Ball, BALL_R, CLUBS, SURF, DT, predict, flatPuttDist } from './physics.js';
 import { Ribbon, groundLine, createMarker, Particles, puff, confetti } from './fx.js';
 import { QUALITY, createPost } from './post.js';
+import { createPismoScene, setPismoNight } from './pismo-scene.js';
 import { Audio } from './audio.js';
 
 const params = new URLSearchParams(location.search);
@@ -137,7 +138,8 @@ async function build() {
     W0.bmat = { color: new THREE.Color() };
   } else if (PISMO) {
     // no Rock, stacks, beacons, wisps or boats; the hero framing reads the dune ridge behind the green as its "crest".
-    // Hooks for later jobs: the pier, the town and the dune planting go here.
+    // the pier, the PISMO BEACH arch, the town by the pier and the lifeguard towers (pismo-scene.js)
+    const ps = createPismoScene(qLevel); scene.add(ps); W0.pismoInfo = ps.userData.info;
     W0.crest = [];
     for (let x = GREEN.x - 160; x <= GREEN.x + 80; x += 8) for (let z = GREEN.z - 200; z <= GREEN.z - 60; z += 8) { const y = heightAt(x, z); if (y > 18) W0.crest.push(new V3(x, y, z)); }
     W0.rock = null; W0.boats = inert();
@@ -233,6 +235,7 @@ function applyLook() {
   look = lookFor(sp.elevation, weather);
   const night = THREE.MathUtils.smoothstep(-sp.elevation, 2, 9); // 0 day → 1 night
   look.nightK = night; look.elev = sp.elevation;
+  if (PISMO) setPismoNight(night);
   if (BISHOP && night < 0.5) {
     // inland valley: a natural Central Coast sky, a clean blue overhead and a pale, dusty haze low over the hills instead of
     // the coast's purple band; the weather's grey still comes through (cloud and fog are already mixed into look)
@@ -1229,6 +1232,7 @@ if (TEST) {
     geo: PISMO ? { tee: pismo.worldToLl(TEE.x, TEE.z), cup: pismo.worldToLl(CUP.x, CUP.z), green: pismo.worldToLl(GREEN.x, GREEN.z), site: pismo.SITE } : BISHOP ? { tee: bishop.worldToLl(TEE.x, TEE.z), corner: bishop.worldToLl(bishop.CORNER.x, bishop.CORNER.z), cup: bishop.worldToLl(CUP.x, CUP.z), site: bishop.SITE, landmarks: bishop.LM } : null,
     W0, surfY: () => W0.backdrop && W0.backdrop.userData.surfaceY, camera,
     probe: TEST && BISHOP ? { fairwayDist, llToWorld: bishop.llToWorld } : null,
+    get pismo() { return PISMO ? W0.pismoInfo || null : null; },
     TEE, CUP, bunkers: BUNKERS, pond: BISHOP ? bishop.POND : null, aimVia: AIM_VIA, heightAt,
     // Bishop Peak scene facts for the tests: the M draped on the hillside, the real-elevation heightmaps, the Inn's placement
     bishopCheck: () => {
