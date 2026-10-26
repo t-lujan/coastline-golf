@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GULLS, STACKS, CUP, TEE, PAR, HOLE_YD, MAP_ID, heightAt, fbm } from './course.js';
-import { MAP } from './maps/index.js';
+import { MAP, HOLE_NO } from './maps/index.js';
 
 export function createStacks() {
   // the three power-plant stacks and the turbine hall, merged into one vertex-coloured, flat-shaded mesh (one draw call)
@@ -20,7 +20,7 @@ export function createStacks() {
 function flagTexture() {
   const c = document.createElement('canvas'); c.width = 256; c.height = 160; const x = c.getContext('2d');
   x.fillStyle = '#B8E6E6'; x.fillRect(0, 0, 256, 160);
-  x.fillStyle = '#28283F'; x.font = '700 110px "Schibsted Grotesk", system-ui, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('1', 128, 86);
+  x.fillStyle = '#28283F'; x.font = '700 110px "Schibsted Grotesk", system-ui, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(String(HOLE_NO), 128, 86);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 export function createFlag() {
@@ -52,7 +52,7 @@ export function createFlag() {
   cupGeo.rotateX(-Math.PI / 2); cupGeo.translate(0, 0.025, 0);
   g.add(new THREE.Mesh(cupGeo, new THREE.MeshLambertMaterial({ vertexColors: true })));
   g.position.set(CUP.x, y, CUP.z);
-  return { group: g, pin, pole, flag, uniforms };
+  return { group: g, pin, pole, flag, uniforms, number: HOLE_NO };
 }
 export function createTeeMarkers() {
   // classic mushroom tee markers in the palette, a tee sign, and a ball washer post

@@ -1,7 +1,7 @@
 // Coastline Golf · Morro Rock / Bishop Peak / Pismo Pier (the active map is chosen in maps/index.js)
 import * as THREE from 'three';
 import { TEE, CUP, GREEN, PAR, HOLE_M, HOLE_YD, ROCK, STACKS, BOUNDS, HEADING, MAP_ID, WATER_LEVEL, BUNKERS, heightAt, surfaceAt, greenDist, normalAt, fairwayDist } from './course.js';
-import { MAP, MAPS, MAP_KEYS, rememberMap } from './maps/index.js';
+import { MAP, MAPS, MAP_KEYS, HOLE_NO, rememberMap } from './maps/index.js';
 import * as bishop from './maps/bishop.js';
 import * as pismo from './maps/pismo.js';
 import { landColor, createBackdrop, createBishopKnobs, createCerroM, createMadonnaInn, createInnSign, createDryGrass, createChaparral, createGranite, createFarOaks } from './bishop-scene.js';
@@ -32,7 +32,6 @@ const PISMO = MAP_ID === 'pismo', HAS_ROCK = MAP_ID === 'morro';
 const FOCUS = BISHOP ? bishop.LM.bishop : PISMO ? { x: GREEN.x - 40, z: GREEN.z - 110 } : ROCK;
 // the first shot's aim point when the cup is round a corner
 const AIM_VIA = BISHOP ? bishop.AIM_VIA : PISMO ? pismo.AIM_VIA : null;
-const HOLE_NO = MAP_KEYS.indexOf(MAP_ID) + 1;
 const touch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 1;
 const $ = (id) => document.getElementById(id);
 const V3 = THREE.Vector3;
@@ -1245,7 +1244,7 @@ if (TEST) {
     showEnd, get state() { return G.state; }, get strokes() { return G.strokes; }, get ball() { return { ...ball.p, state: ball.state, lie: ball.lie }; },
     get fps() { return perf.fps; }, get fpsHistory() { return perf.history.slice(); }, get frameMs() { return { update: +perf.upd.toFixed(2), render: +perf.ren.toFixed(2) }; }, info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }), get quality() { return qLevel; }, get tierChanges() { return tierChanges; }, autoStart, get weather() { return weather; }, errors,
     get yaw() { return G.yaw; }, get preview() { return G.preview; }, get pvZoom() { return G.pvZoom; }, togglePreview, previewLand, tapPreview, get pvSpot() { return G.pvSpot; }, get pvLabel() { return $('pvtap').hidden ? '' : $('pvtap').textContent; }, get grid() { return { visible: W0.grid.mesh.visible, on: W0.grid.on, count: W0.grid.pts.length }; }, get club() { return G.club; }, W0, camera, renderer, scene,
-    hole: { par: PAR, yd: HOLE_YD, m: HOLE_M },
+    hole: { par: PAR, yd: HOLE_YD, m: HOLE_M, no: HOLE_NO, get flagNo() { return W0.flag && W0.flag.number; } },
     map: { id: MAP_ID, name: MAP.name, lat: MAP.lat, lon: MAP.lon, weatherLat: MAP.weatherLat, weatherLon: MAP.weatherLon, heading: HEADING },
     // real-world mapping of the Bishop Peak hole: tee / corner / cup as lat-lon, and the landmarks' lat-lon with their world positions
     geo: PISMO ? { tee: pismo.worldToLl(TEE.x, TEE.z), cup: pismo.worldToLl(CUP.x, CUP.z), green: pismo.worldToLl(GREEN.x, GREEN.z), site: pismo.SITE } : BISHOP ? { tee: bishop.worldToLl(TEE.x, TEE.z), corner: bishop.worldToLl(bishop.CORNER.x, bishop.CORNER.z), cup: bishop.worldToLl(CUP.x, CUP.z), site: bishop.SITE, landmarks: bishop.LM } : null,

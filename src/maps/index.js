@@ -31,4 +31,6 @@ function pick() {
 }
 export const MAP_ID = pick();
 export const MAP = MAPS[MAP_ID];
+// the hole's number is its place in the hole list (Morro 1, Bishop 2, Pismo 3, ...): the HUD label and the pin flag use it
+export const HOLE_NO = MAP_KEYS.indexOf(MAP_ID) + 1;
 export function rememberMap(id) { try { localStorage.setItem('cg-map', id); } catch (e) { /* storage blocked */ } }
