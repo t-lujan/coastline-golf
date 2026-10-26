@@ -74,7 +74,7 @@ export class Ball {
     if (putt) { this.w = { x: this.v.z / BALL_R, y: 0, z: -this.v.x / BALL_R }; }   // a putt leaves the face already rolling
     this.state = putt ? 'roll' : 'flight';
     this.lastDry = { ...this.p }; this.dryT = 0; this.maxH = this.p.y; this.carry = null; this.events = []; this.bounces = 0; this.rollT = 0;
-    this.apex = 0; this.landAngle = null; this.lipped = false; this.rim = 0;
+    this.apex = 0; this.landAngle = null; this.lipped = false; this.rim = 0; this.crawl = 0;
   }
   ground() { return heightAt(this.p.x, this.p.z) + BALL_R; }
   // advance by dt seconds in whole fixed substeps; the remainder carries over so any frame rate gives the same trajectory
@@ -138,7 +138,11 @@ export class Ball {
     p.x += v.x * dt; p.z += v.z * dt; p.y = this.ground(); v.y = 0;
     if (!this.flat) this.checkCup(Math.hypot(v.x, v.z));
     const sp2 = Math.hypot(v.x, v.z);
-    if (this.state === 'roll' && sp2 < 0.04 && slope < fr * 1.02) { v.x = v.z = 0; w.x = w.y = w.z = 0; this.state = 'rest'; this.lie = surf; this.events.push({ type: 'rest' }); }
+    // static friction: off the green, a nearly stopped ball (< 0.3 m/s) stays put unless the slope beats the full rolling friction
+    // (the low-speed taper above would otherwise let it creep down a dune face for ages); anywhere, a crawl under 0.12 m/s for 1.5 s stops
+    this.crawl = sp2 < 0.12 ? (this.crawl || 0) + dt : 0;
+    const grip = surf !== 'green' && sp2 < 0.3 && slope < fr * 1.02;
+    if (this.state === 'roll' && ((sp2 < 0.04 && slope < fr * 1.02) || grip || this.crawl > 1.5)) { v.x = v.z = 0; w.x = w.y = w.z = 0; this.state = 'rest'; this.lie = surf; this.events.push({ type: 'rest' }); }
     if (this.t > 40) { this.state = 'rest'; this.lie = surf; }
   }
   impact(gy) {
