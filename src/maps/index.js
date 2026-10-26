@@ -1,7 +1,8 @@
 // The playable maps and which one is active. The choice is made once per page load (the course data is bound at import
-// time): ?map=morro|bishop wins, then the last pick saved in localStorage, then Morro Rock.
+// time): ?map=morro|bishop|pismo wins, then the last pick saved in localStorage, then Morro Rock.
 import * as morro from './morro.js';
 import * as bishop from './bishop.js';
+import * as pismo from './pismo.js';
 
 export const MAPS = {
   morro: {
@@ -13,6 +14,11 @@ export const MAPS = {
     id: 'bishop', name: 'Bishop Peak', course: bishop, place: 'San Luis Obispo', lat: bishop.SITE.lat, lon: bishop.SITE.lon, weatherLat: bishop.SITE.lat, weatherLon: bishop.SITE.lon,
     blurb: 'Par 4 in the valley below Bishop Peak, with Cerro San Luis and the Madonna Inn across the way.', short: 'Par 4 · valley', fogScale: 0.3,
     cap: 'dogleg right toward Bishop Peak', loaderSub: 'Par 4 in the San Luis Obispo valley, played under live San Luis Obispo weather.',
+  },
+  pismo: {
+    id: 'pismo', name: 'Pismo Pier', course: pismo, place: 'Pismo Beach', lat: pismo.SITE.lat, lon: pismo.SITE.lon, weatherLat: 35.1388, weatherLon: -120.6431,
+    blurb: 'Par 5 from the Pismo Beach Pier down the beach to the Oceano Dunes.', short: 'Par 5 · beach links', fogScale: 0.8,
+    cap: 'carry Pismo Creek, down the beach to the dunes', loaderSub: 'Par 5 down Pismo State Beach, played under live Pismo Beach weather.',
   },
 };
 export const MAP_KEYS = Object.keys(MAPS);

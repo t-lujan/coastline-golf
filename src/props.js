@@ -1,7 +1,7 @@
 // Landmarks and course furniture: Morro Rock, the three stacks, flag + cup, tee markers, ball, gulls.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { ROCK, STACKS, CUP, TEE, PAR, HOLE_YD, MAP_ID, heightAt, fbm } from './course.js';
+import { GULLS, STACKS, CUP, TEE, PAR, HOLE_YD, MAP_ID, heightAt, fbm } from './course.js';
 import { MAP } from './maps/index.js';
 
 export function createStacks() {
@@ -101,7 +101,7 @@ export function createGulls(n) {
   const mesh = new THREE.InstancedMesh(geo, mat, n); mesh.frustumCulled = false;
   const birds = [], m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), s = new THREE.Vector3();
   for (let i = 0; i < n; i++) {
-    birds.push({ s: 0.9 + Math.random() * 0.5, r: 60 + Math.random() * 90, h: 40 + Math.random() * 70, sp: (0.08 + Math.random() * 0.08) * (Math.random() < 0.5 ? 1 : -1), ph: Math.random() * 6.3, cx: ROCK.x + (Math.random() - 0.5) * 60, cz: ROCK.z + 40 });
+    birds.push({ s: 0.9 + Math.random() * 0.5, r: 60 + Math.random() * 90, h: 40 + Math.random() * 70, sp: (0.08 + Math.random() * 0.08) * (Math.random() < 0.5 ? 1 : -1), ph: Math.random() * 6.3, cx: GULLS.x + (Math.random() - 0.5) * 60, cz: GULLS.z + 40 });
   }
   mesh.userData.update = (t) => {
     birds.forEach((u, i) => {

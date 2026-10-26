@@ -1,8 +1,9 @@
-// Coastline Golf · Hole 1 · Morro Rock / Bishop Peak (the active map is chosen in maps/index.js)
+// Coastline Golf · Morro Rock / Bishop Peak / Pismo Pier (the active map is chosen in maps/index.js)
 import * as THREE from 'three';
 import { TEE, CUP, GREEN, PAR, HOLE_M, HOLE_YD, ROCK, STACKS, BOUNDS, HEADING, MAP_ID, WATER_LEVEL, BUNKERS, heightAt, surfaceAt, greenDist, normalAt, fairwayDist } from './course.js';
 import { MAP, MAPS, MAP_KEYS, rememberMap } from './maps/index.js';
 import * as bishop from './maps/bishop.js';
+import * as pismo from './maps/pismo.js';
 import { landColor, createBackdrop, createBishopKnobs, createCerroM, createMadonnaInn, createInnSign, createDryGrass, createChaparral, createGranite, createFarOaks } from './bishop-scene.js';
 import { sunPosition, sceneDate, laClock, lookFor } from './sun.js';
 import { getWeather, compass, windVector } from './weather.js';
@@ -22,8 +23,14 @@ import { Audio } from './audio.js';
 const params = new URLSearchParams(location.search);
 const TEST = params.has('test');
 const BISHOP = MAP_ID === 'bishop';
-// the landmark the hero shots frame: Morro Rock, or Bishop Peak's summit knobs
-const FOCUS = BISHOP ? bishop.LM.bishop : ROCK;
+// every non-Bishop map is a coastal one (ocean, surf, gulls, coastal planting); only Morro Rock has the Rock, its stacks,
+// beacons, wisps and boats. Pismo Pier is coastal without them.
+const PISMO = MAP_ID === 'pismo', HAS_ROCK = MAP_ID === 'morro';
+// the landmark the hero shots frame: Morro Rock, Bishop Peak's summit knobs, or the Oceano dunes behind the Pismo green
+const FOCUS = BISHOP ? bishop.LM.bishop : PISMO ? { x: GREEN.x - 40, z: GREEN.z - 110 } : ROCK;
+// the first shot's aim point when the cup is round a corner
+const AIM_VIA = BISHOP ? bishop.AIM_VIA : PISMO ? pismo.AIM_VIA : null;
+const HOLE_NO = MAP_KEYS.indexOf(MAP_ID) + 1;
 const touch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 1;
 const $ = (id) => document.getElementById(id);
 const V3 = THREE.Vector3;
@@ -91,9 +98,10 @@ async function build() {
   // mesh detail follows the tier the game starts on (built once; a later tier change keeps these meshes)
   const L = QUALITY[qLevel], ts = qLevel === 'high' && touch ? [230, 238, 70, 205, 90, 75] : L.terrain;
   if (BISHOP) await bishop.loadHeights();
-  const depthTex = bakeDepth(512, !BISHOP);
+  const depthTex = bakeDepth(512, HAS_ROCK);
   const patches = BISHOP
     ? { corridor: { minX: -50, maxX: 235, minZ: -125, maxZ: 330 }, green: { minX: GREEN.x - 32, maxX: GREEN.x + 32, minZ: GREEN.z - 28, maxZ: GREEN.z + 30 } }
+    : PISMO ? { corridor: { minX: -95, maxX: 65, minZ: -548, maxZ: -10 }, green: { minX: GREEN.x - 32, maxX: GREEN.x + 32, minZ: GREEN.z - 28, maxZ: GREEN.z + 30 } }
     : { corridor: { minX: -60, maxX: 80, minZ: -178, maxZ: 232 }, green: { minX: -28, maxX: 32, minZ: -165, maxZ: -115 } };
   const style = BISHOP ? 'inland' : 'coast';
   // Bishop's outer ground is mostly rough beyond the corridor patch (the real hills carry the detail): a lighter grid
@@ -119,13 +127,22 @@ async function build() {
     W0.backdrop = createBackdrop(qLevel === 'high' && !touch ? 'high' : qLevel === 'low' ? 'low' : 'med'); scene.add(W0.backdrop);
     scene.add(createFarOaks(qLevel === 'high' ? (touch ? 2400 : 5000) : qLevel === 'med' ? 1700 : 1000, W0.backdrop.userData.surfaceY, qLevel === 'low' ? 0 : qLevel === 'high' && !touch ? 600 : 260));
   } else scene.add(createHills());
-  await loadStep(BISHOP ? 'Raising Bishop Peak' : 'Raising Morro Rock', 0.35);
+  await loadStep(BISHOP ? 'Raising Bishop Peak' : PISMO ? 'Raising the Oceano Dunes' : 'Raising Morro Rock', 0.35);
   if (BISHOP) {
     const knobs = createBishopKnobs(qLevel === 'high' && !touch ? 2 : 1); W0.crest = knobs.userData.crest; W0.rock = knobs; scene.add(knobs);
     const sy = W0.backdrop.userData.surfaceY;
     W0.cerroM = createCerroM(sy); scene.add(W0.cerroM); W0.inn = createMadonnaInn(sy); scene.add(W0.inn); W0.innSign = createInnSign(sy); scene.add(W0.innSign);
     W0.boats = inert(); W0.mist = { group: new THREE.Group(), uniforms: { uCol: { value: new THREE.Color() }, uAmt: { value: 0 }, uTime: { value: 0 } } };
     W0.wisps = { points: new THREE.Group(), uniforms: { uCol: { value: new THREE.Color() }, uWind: { value: new THREE.Vector2() }, uTime: { value: 0 }, uScale: { value: 0 } } };
+    W0.bmat = { color: new THREE.Color() };
+  } else if (PISMO) {
+    // no Rock, stacks, beacons, wisps or boats; the hero framing reads the dune ridge behind the green as its "crest".
+    // Hooks for later jobs: the pier, the town and the dune planting go here.
+    W0.crest = [];
+    for (let x = GREEN.x - 160; x <= GREEN.x + 80; x += 8) for (let z = GREEN.z - 200; z <= GREEN.z - 60; z += 8) { const y = heightAt(x, z); if (y > 18) W0.crest.push(new V3(x, y, z)); }
+    W0.rock = null; W0.boats = inert();
+    W0.wisps = { points: new THREE.Group(), uniforms: { uCol: { value: new THREE.Color() }, uWind: { value: new THREE.Vector2() }, uTime: { value: 0 }, uScale: { value: 0 } } };
+    W0.mist = createMist(depthTex, BOUNDS); scene.add(W0.mist.group);
     W0.bmat = { color: new THREE.Color() };
   } else {
     const rock = createRock(qLevel === 'high' && touch ? 'med' : L.rock); W0.crest = rock.userData.crest; W0.rock = rock.children[0]; scene.add(rock); scene.add(createStacks());
@@ -187,22 +204,22 @@ async function build() {
   applyLook();
   resize();
   setQuality(qLevel, false);
-  if (BISHOP) camera.position.set(-120, 60, 120); else camera.position.set(-260, 60, -470);
+  if (BISHOP) camera.position.set(-120, 60, 120); else if (PISMO) camera.position.set(140, 50, 80); else camera.position.set(-260, 60, -470);
   camera.lookAt(FOCUS.x, 60, FOCUS.z);
   renderer.compile(scene, camera);
   post.render();
   await loadStep('Ready', 1);
 }
 // par and yardage come from the course itself (centre-line length, tee -> dogleg corner -> cup)
-$('hole-text').textContent = `Hole 1 · ${MAP.name} · Par ${PAR} · ${HOLE_YD} yd`;
+$('hole-text').textContent = `Hole ${HOLE_NO} · ${MAP.name} · Par ${PAR} · ${HOLE_YD} yd`;
 $('fly-sub').textContent = `Par ${PAR} · ${HOLE_YD} yd · ${MAP.cap}`;
-if (BISHOP) {
-  document.title = 'Coastline Golf · Bishop Peak'; $('scene').setAttribute('aria-label', '3D golf hole below Bishop Peak, San Luis Obispo');
-  document.querySelector('#flytitle h2').textContent = MAP.name; document.querySelector('#loader h1').textContent = `Hole 1 · ${MAP.name}`;
-  document.querySelector('#loader .sub').textContent = MAP.loaderSub; document.querySelector('#endcard .eyebrow').textContent = `Hole 1 · ${MAP.name}`;
-  document.getElementById('info-wx').innerHTML = '<b>Open-Meteo live weather</b> for San Luis Obispo: real wind pushes your ball, visibility thickens the valley haze, cloud cover greys the sky.';
-  document.getElementById('info-sun').innerHTML = '<b>The real sun</b>: solar position over San Luis Obispo at the current California time sets the light, from morning haze to golden hour to moonlight.';
-  document.getElementById('info-map').hidden = false; document.getElementById('info-map').innerHTML = '<b>Real-world mapping</b>: Bishop Peak, Cerro San Luis Obispo (and its "M"), the Madonna Inn and the Nine Sisters stand at their true bearings and distances, on real elevation data (Mapzen Terrain Tiles / AWS Open Data, including USGS 3DEP and SRTM).';
+if (MAP_ID !== 'morro') {
+  document.title = `Coastline Golf · ${MAP.name}`; $('scene').setAttribute('aria-label', BISHOP ? '3D golf hole below Bishop Peak, San Luis Obispo' : '3D golf hole down Pismo State Beach from the Pismo Pier to the Oceano Dunes');
+  document.querySelector('#flytitle h2').textContent = MAP.name; document.querySelector('#loader h1').textContent = `Hole ${HOLE_NO} · ${MAP.name}`;
+  document.querySelector('#loader .sub').textContent = MAP.loaderSub; document.querySelector('#endcard .eyebrow').textContent = `Hole ${HOLE_NO} · ${MAP.name}`;
+  document.getElementById('info-wx').innerHTML = `<b>Open-Meteo live weather</b> for ${MAP.place}: real wind pushes your ball, visibility thickens the ${BISHOP ? 'valley' : 'sea'} haze, cloud cover greys the sky.`;
+  document.getElementById('info-sun').innerHTML = `<b>The real sun</b>: solar position over ${MAP.place} at the current California time sets the light, from morning haze to golden hour to moonlight.`;
+  document.getElementById('info-map').hidden = false; document.getElementById('info-map').innerHTML = PISMO ? '<b>Real-world mapping</b>: the hole runs from the Pismo Beach Pier down Pismo State Beach, across the Pismo Creek mouth, to the Oceano Dunes, laid out from OpenStreetMap and real elevation data (the beach between is shortened ~8x along the shore).' : '<b>Real-world mapping</b>: Bishop Peak, Cerro San Luis Obispo (and its "M"), the Madonna Inn and the Nine Sisters stand at their true bearings and distances, on real elevation data (Mapzen Terrain Tiles / AWS Open Data, including USGS 3DEP and SRTM).';
 }
 
 // ---------- light, sky, fog from real time + weather ----------
@@ -332,7 +349,7 @@ const cupPos = () => new V3(CUP.x, heightAt(CUP.x, CUP.z), CUP.z);
 const distToCup = () => Math.hypot(ball.p.x - CUP.x, ball.p.z - CUP.z);
 const yawTo = (x, z) => Math.atan2(x - ball.p.x, -(z - ball.p.z));
 // where a fresh shot is aimed: at the cup, except on a dogleg where the cup is out of sight round the corner
-const aimYaw = () => (BISHOP && distToCup() > bishop.AIM_VIA.until && ball.p.z > bishop.AIM_VIA.z + 40 ? yawTo(bishop.AIM_VIA.x, bishop.AIM_VIA.z) : yawTo(CUP.x, CUP.z));
+const aimYaw = () => (AIM_VIA && distToCup() > AIM_VIA.until && ball.p.z > AIM_VIA.z + 40 ? yawTo(AIM_VIA.x, AIM_VIA.z) : yawTo(CUP.x, CUP.z));
 
 function autoClub() {
   if (ball.lie === 'green') return 'putter';
@@ -556,6 +573,19 @@ function buildFlyover() {
       f(12.6, ...panPos(0, true).toArray(), ...panLook(0)),   // lands on the tee camera already turned onto the Madonna Inn: the opening pan takes over
     ];
     fly.path = keyPath(keys); fly.dur = keys[keys.length - 1][0]; fly.keys = keys;
+    return;
+  }
+  if (PISMO) {
+    // placeholder (a later job does the real pier -> dunes pan): from high over the dunes behind the green, round the flag
+    // and back up the beach (ocean on the left of the view) onto the tee aim view
+    const keys = [
+      [0.0, -150, 70, -700, c.x, c.y, c.z],
+      [2.6, 40, 40, -600, c.x, c.y, c.z],
+      [5.0, 70, 30, -420, c.x + 10, c.y, c.z],
+      [8.0, 70, 26, -150, 10, 4, -330],
+      [10.6, e.x, e.y, e.z, l.x, l.y, l.z],
+    ].map(([t, ...r]) => [t * k, ...r]);
+    fly.path = keyPath(keys); fly.dur = keys[keys.length - 1][0];
     return;
   }
   // the heading only ever turns one way (from the Rock round to the fairway), the view tips down once onto the green
@@ -1196,10 +1226,10 @@ if (TEST) {
     hole: { par: PAR, yd: HOLE_YD, m: HOLE_M },
     map: { id: MAP_ID, name: MAP.name, lat: MAP.lat, lon: MAP.lon, weatherLat: MAP.weatherLat, weatherLon: MAP.weatherLon, heading: HEADING },
     // real-world mapping of the Bishop Peak hole: tee / corner / cup as lat-lon, and the landmarks' lat-lon with their world positions
-    geo: BISHOP ? { tee: bishop.worldToLl(TEE.x, TEE.z), corner: bishop.worldToLl(bishop.CORNER.x, bishop.CORNER.z), cup: bishop.worldToLl(CUP.x, CUP.z), site: bishop.SITE, landmarks: bishop.LM } : null,
+    geo: PISMO ? { tee: pismo.worldToLl(TEE.x, TEE.z), cup: pismo.worldToLl(CUP.x, CUP.z), green: pismo.worldToLl(GREEN.x, GREEN.z), site: pismo.SITE } : BISHOP ? { tee: bishop.worldToLl(TEE.x, TEE.z), corner: bishop.worldToLl(bishop.CORNER.x, bishop.CORNER.z), cup: bishop.worldToLl(CUP.x, CUP.z), site: bishop.SITE, landmarks: bishop.LM } : null,
     W0, surfY: () => W0.backdrop && W0.backdrop.userData.surfaceY, camera,
     probe: TEST && BISHOP ? { fairwayDist, llToWorld: bishop.llToWorld } : null,
-    TEE, CUP, bunkers: BUNKERS, pond: BISHOP ? bishop.POND : null, aimVia: BISHOP ? bishop.AIM_VIA : null, heightAt,
+    TEE, CUP, bunkers: BUNKERS, pond: BISHOP ? bishop.POND : null, aimVia: AIM_VIA, heightAt,
     // Bishop Peak scene facts for the tests: the M draped on the hillside, the real-elevation heightmaps, the Inn's placement
     bishopCheck: () => {
       if (!BISHOP) return null;
