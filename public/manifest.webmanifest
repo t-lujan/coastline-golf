@@ -1,0 +1,14 @@
+{
+  "name": "Coastline Golf",
+  "short_name": "Coastline Golf",
+  "description": "Real California coastal holes with live weather. Play in your browser.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#28283F",
+  "theme_color": "#28283F",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
