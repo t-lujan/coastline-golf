@@ -11,7 +11,7 @@ export const MAPS = {
     cap: 'carry the inlet', loaderSub: 'Par 4 on the San Luis Obispo coast, played under live Morro Bay weather.',
   },
   bishop: {
-    id: 'bishop', name: 'Bishop Peak', course: bishop, place: 'San Luis Obispo', lat: bishop.SITE.lat, lon: bishop.SITE.lon, weatherLat: bishop.SITE.lat, weatherLon: bishop.SITE.lon,
+    id: 'bishop', name: 'Bishop Peak', course: bishop, place: 'San Luis Obispo', lat: bishop.SITE.lat, lon: bishop.SITE.lon, weatherLat: bishop.SITE.lat, weatherLon: bishop.SITE.lon, windStation: 'KSBP',
     blurb: 'Par 4 in the valley below Bishop Peak, with Cerro San Luis and the Madonna Inn across the way.', short: 'Par 4 · valley', fogScale: 0.3,
     cap: 'dogleg right toward Bishop Peak', loaderSub: 'Par 4 in the San Luis Obispo valley, played under live San Luis Obispo weather.',
   },

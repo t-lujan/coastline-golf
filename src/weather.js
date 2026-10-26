@@ -1,5 +1,6 @@
 import { HEADING } from './course.js';
 // Live conditions for the active map's site (Morro Bay, or San Luis Obispo) from Open-Meteo (free, no key). Falls back to typical conditions.
+// Bishop's wind (speed, gust, direction) comes from the newest KSBP (San Luis Obispo airport) observation with a wind reading from api.weather.gov (last ~30 min, must be < 90 min old), which runs windier than the model; Open-Meteo wind is the fallback.
 const url = (m) => `https://api.open-meteo.com/v1/forecast?latitude=${m.weatherLat}&longitude=${m.weatherLon}` +
   '&current=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,cloud_cover,visibility,weather_code,is_day' +
   '&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=America%2FLos_Angeles';
@@ -20,18 +21,31 @@ export function windRel(from, heading = HEADING) {
   return ['into', 'into, R→L', 'R→L', 'helping, R→L', 'helping', 'helping, L→R', 'L→R', 'into, L→R'][Math.round(a / 45) % 8];
 }
 
+const KMH = 0.621371;
+async function getJson(u) {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 4500);
+  try { const r = await fetch(u, { signal: ctl.signal }); return r.ok ? await r.json() : null; } catch (e) { return null; } finally { clearTimeout(t); }
+}
+
 export async function getWeather(params, map) {
-  let w = { ...FALLBACK };
+  let w = { ...FALLBACK, windSource: 'fallback' };
   if (params.get('weather') !== 'offline') {
-    try {
-      const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 4500);
-      const r = await fetch(url(map), { signal: ctl.signal }); clearTimeout(t);
-      if (r.ok) {
-        const c = (await r.json()).current;
-        w = { tempF: c.temperature_2m, windMph: c.wind_speed_10m, windFrom: c.wind_direction_10m, gustMph: c.wind_gusts_10m ?? c.wind_speed_10m,
-          cloud: c.cloud_cover, visibility: c.visibility ?? 20000, code: c.weather_code, live: true };
-      }
-    } catch (e) { /* offline: keep fallback */ }
+    const [om, obs] = await Promise.all([getJson(url(map)),
+      map.windStation ? getJson(`https://api.weather.gov/stations/${map.windStation}/observations?limit=6`) : null]);
+    const c = om && om.current;
+    if (c) {
+      w = { tempF: c.temperature_2m, windMph: c.wind_speed_10m, windFrom: c.wind_direction_10m, gustMph: c.wind_gusts_10m ?? c.wind_speed_10m,
+        cloud: c.cloud_cover, visibility: c.visibility ?? 20000, code: c.weather_code, live: true, windSource: 'open-meteo' };
+    }
+    // KSBP posts every ~5 min and some reports have no wind: take the newest report that has a wind speed
+    const f = obs && Array.isArray(obs.features) && obs.features.find((x) => x && x.properties && x.properties.windSpeed && typeof x.properties.windSpeed.value === 'number');
+    const p = f && f.properties, sp = p && p.windSpeed.value, age = p ? Date.now() - Date.parse(p.timestamp) : NaN;
+    if (typeof sp === 'number' && age > -10 * 60000 && age < 90 * 60000) {
+      const mph = sp * KMH, d = p.windDirection && p.windDirection.value, g = p.windGust && p.windGust.value;
+      w.windMph = mph; if (typeof d === 'number') w.windFrom = d;
+      w.gustMph = typeof g === 'number' ? g * KMH : Math.max(mph, c ? w.gustMph : 0);
+      w.windSource = map.windStation;
+    }
   }
   // test / showcase overrides
   const o = params.get('weather');
