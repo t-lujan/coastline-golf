@@ -368,7 +368,8 @@ function autoClub() {
   const d = distToCup() * YD;
   // the wedge inside ~100 yd, and out of a bunker anywhere it can reach the green from
   if (d <= 100 || ball.lie === 'sand' && d <= 110) return 'wedge';
-  return d > 180 && ball.lie !== 'sand' ? 'driver' : 'iron';
+  if (d > 180 && ball.lie !== 'sand') return ball.lie === 'tee' ? 'driver' : d > 200 ? 'wood' : 'iron';
+  return 'iron';
 }
 function setClub(c, manual = false) {
   G.club = c; G.manualClub = manual;
@@ -376,7 +377,7 @@ function setClub(c, manual = false) {
 }
 function aimPose(club = G.club, yaw = G.yaw) {
   const putt = club === 'putter', p = ball.p;
-  const dist = putt ? 3.4 : club === 'wedge' ? 6 : club === 'iron' ? 7 : 8.5, h = putt ? 1.2 : club === 'wedge' ? 2.1 : club === 'iron' ? 2.3 : 2.7;
+  const dist = putt ? 3.4 : club === 'wedge' ? 6 : club === 'iron' ? 7 : club === 'wood' ? 7.8 : 8.5, h = putt ? 1.2 : club === 'wedge' ? 2.1 : club === 'iron' ? 2.3 : club === 'wood' ? 2.5 : 2.7;
   // off the (elevated) tee the camera stands back and a little higher, tipped down so the landing zone and its bunkers read
   const onTee = ball.lie === 'tee' && !putt, back = dist + (onTee ? 2.5 : 0);
   const dx = Math.sin(yaw), dz = -Math.cos(yaw);
@@ -829,7 +830,7 @@ window.addEventListener('keydown', (e) => {
   if (G.state === 'aim' && !cam.to) {
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { G.yaw += (e.key === 'ArrowLeft' ? -1 : 1) * (G.club === 'putter' ? 0.01 : 0.02); if (!G.preview) tweenTo(aimPose(), 0.12); }
     if ((e.key === ',' || e.key === '.') && G.club !== 'putter') { G.curve = Math.max(-1, Math.min(1, Math.round((G.curve + (e.key === ',' ? -0.5 : 0.5)) * 2) / 2)); G.lastPred = null; updateCurveHud(); if (drag.on) updateAim(); }
-    const k = { 1: 'driver', 2: 'iron', 3: 'wedge', 4: 'putter' }[e.key]; if (k) { setClub(k, true); if (G.preview && k === 'putter') togglePreview(false); else if (!G.preview) tweenTo(aimPose(), 0.6); }
+    const k = { 1: 'driver', 2: 'wood', 3: 'iron', 4: 'wedge', 5: 'putter' }[e.key]; if (k) { setClub(k, true); if (G.preview && k === 'putter') togglePreview(false); else if (!G.preview) tweenTo(aimPose(), 0.6); }
   }
   if (G.state === 'aim' && !e.ctrlKey && !e.metaKey && !e.altKey) {
     if (e.key === 'z' || e.key === 'Z') togglePreview();

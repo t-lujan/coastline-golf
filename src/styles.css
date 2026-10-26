@@ -101,7 +101,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
   #q-level { display: none; }
   .icon.wide { width: 42px; padding: 0; font-size: 11px; }
   #hud .bottom { flex-direction: column-reverse; align-items: stretch; }
-  .seg { justify-content: stretch; } .seg button { flex: 1; }
+  .seg { justify-content: stretch; } .seg button { flex: 1; padding-left: 6px; padding-right: 6px; font-size: 12.5px; }
   .stats { justify-content: space-between; }
   .chip.wx { font-size: 12.5px; padding: 7px 10px; }
 }

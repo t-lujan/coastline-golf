@@ -17,6 +17,7 @@ const RPM = Math.PI / 30;
 // hot: lands on a green with its pace (no check, its spin does not bite) and runs on / through
 export const CLUBS = {
   driver: { name: 'Driver', vmax: 72, launch: 11.5, spin: 2500 * RPM, side: 520 * RPM, spinTau: 22, grab: 0.8, hot: true },
+  wood:   { name: 'Wood',   vmax: 63, launch: 13,   spin: 3700 * RPM, side: 640 * RPM, spinTau: 21, grab: 0.3 },
   iron:   { name: 'Iron',   vmax: 49, launch: 20,   spin: 6800 * RPM, side: 900 * RPM, spinTau: 20, grab: 0.1 },
   wedge:  { name: 'Wedge',  vmax: 36.5, launch: 33.5,   spin: 9200 * RPM, side: 1100 * RPM, spinTau: 18, grab: 0.65 },
   putter: { name: 'Putter', vmax: 5.6, launch: 0,   spin: 0, side: 0, spinTau: 1 },
@@ -43,7 +44,13 @@ const LIE = {
   rough: { v: 0.9, l: 0.9, s: 0.7 }, waste: { v: 0.8, l: 0.9, s: 0.6 }, sand: { v: 0.62, l: 1.1, s: 0.4 }, path: { v: 1, l: 1, s: 1 },
 };
 const WEDGE_LIE = { rough: { v: 0.86, l: 0.95, s: 0.55 }, waste: { v: 0.95, l: 0.95, s: 0.7 }, sand: { v: 0.9, l: 1.15, s: 0.5 } };
-const lieOf = (club, lie) => (club === 'wedge' && WEDGE_LIE[lie]) || LIE[lie] || LIE.fairway;
+// the driver off the deck: a hard-to-hit club from anything but a tee (lower launch, less spin control, c: wider curve on a mishit)
+const DRIVER_LIE = {
+  fairway: { v: 0.935, l: 0.85, s: 0.8, c: 2.6 }, path: { v: 0.935, l: 0.85, s: 0.8, c: 2.6 },
+  rough: { v: 0.88, l: 0.8, s: 0.55, c: 6 }, waste: { v: 0.82, l: 0.8, s: 0.5, c: 6 }, sand: { v: 0.62, l: 0.9, s: 0.35, c: 6 },
+};
+const WOOD_LIE = { rough: { v: 0.85, l: 0.9, s: 0.65 }, waste: { v: 0.78, l: 0.9, s: 0.55 }, sand: { v: 0.6, l: 1.05, s: 0.4 } };
+const lieOf = (club, lie) => (club === 'wedge' && WEDGE_LIE[lie]) || (club === 'wood' && WOOD_LIE[lie]) || (club === 'driver' && DRIVER_LIE[lie]) || LIE[lie] || LIE.fairway;
 export const liePenalty = (club, lie) => (club === 'putter' ? 1 : lieOf(club, lie).v);
 
 // cup: a ball whose centre is within CUP_R of the hole drops if it is slow enough for that offset, otherwise it skids over the lip
@@ -62,7 +69,7 @@ export class Ball {
     const la = c.launch * L.l * Math.PI / 180, dx = Math.sin(yaw), dz = -Math.cos(yaw);
     this.v = { x: dx * Math.cos(la) * speed, y: Math.sin(la) * speed, z: dz * Math.cos(la) * speed };
     // backspin axis is horizontal and perpendicular to the line; sidespin axis is vertical (curve > 0: a fade bends right)
-    const back = c.spin * L.s * (putt ? 0 : speed / c.vmax), side = -(curve || 0) * c.side * L.s * speed / c.vmax;
+    const back = c.spin * L.s * (putt ? 0 : speed / c.vmax), side = -(curve || 0) * c.side * L.s * (L.c || L.s) * speed / c.vmax;
     this.w = { x: -dz * back, y: side, z: dx * back };
     if (putt) { this.w = { x: this.v.z / BALL_R, y: 0, z: -this.v.x / BALL_R }; }   // a putt leaves the face already rolling
     this.state = putt ? 'roll' : 'flight';
