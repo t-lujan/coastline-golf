@@ -1,6 +1,6 @@
 import { HEADING } from './course.js';
 // Live conditions for the active map's site (Morro Bay, or San Luis Obispo) from Open-Meteo (free, no key). Falls back to typical conditions.
-// Bishop's wind (speed, gust, direction) comes from the newest KSBP (San Luis Obispo airport) observation with a wind reading from api.weather.gov (last ~30 min, must be < 90 min old), which runs windier than the model; Open-Meteo wind is the fallback.
+// Bishop's wind (speed, gust, direction) comes from the newest KSBP (San Luis Obispo airport) observation with a wind reading from api.weather.gov (last ~30 min, must be < 90 min old), and is used when it's stronger than Open-Meteo's wind (the airport can read calm while the hole is breezy); otherwise Open-Meteo wind is used.
 const url = (m) => `https://api.open-meteo.com/v1/forecast?latitude=${m.weatherLat}&longitude=${m.weatherLon}` +
   '&current=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,cloud_cover,visibility,weather_code,is_day' +
   '&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=America%2FLos_Angeles';
@@ -42,9 +42,13 @@ export async function getWeather(params, map) {
     const p = f && f.properties, sp = p && p.windSpeed.value, age = p ? Date.now() - Date.parse(p.timestamp) : NaN;
     if (typeof sp === 'number' && age > -10 * 60000 && age < 90 * 60000) {
       const mph = sp * KMH, d = p.windDirection && p.windDirection.value, g = p.windGust && p.windGust.value;
-      w.windMph = mph; if (typeof d === 'number') w.windFrom = d;
-      w.gustMph = typeof g === 'number' ? g * KMH : Math.max(mph, c ? w.gustMph : 0);
-      w.windSource = map.windStation;
+      // use whichever is stronger: the airport can sit calm while it's still breezy at the hole
+      if (!c || mph > w.windMph) {
+        const omGust = c ? w.gustMph : 0;
+        w.windMph = mph; if (typeof d === 'number' && mph > 0) w.windFrom = d;
+        w.gustMph = Math.max(mph, typeof g === 'number' ? g * KMH : 0, omGust);
+        w.windSource = map.windStation;
+      }
     }
   }
   // test / showcase overrides
