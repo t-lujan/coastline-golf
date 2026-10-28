@@ -49,7 +49,7 @@ export const realY = (x, z) => elevAt(x, z) - ELEV0;
 export const BOUNDS = { minX: -420, maxX: 420, minZ: -380, maxZ: 460 };
 export const PAINT = { minX: -120, maxX: 60, minZ: -60, maxZ: 230 };
 const T0 = enToWorld(-100, -160), G0 = enToWorld(-40, -10);
-export const TEE = { x: Math.round(T0.x * 10) / 10, z: Math.round(T0.z * 10) / 10, w: 5, d: 4, h: realY(T0.x, T0.z) + 0.6, bank: 12 };
+export const TEE = { x: Math.round(T0.x * 10) / 10, z: Math.round(T0.z * 10) / 10, w: 6, d: 5, h: 0, bank: 45 };
 export const GREEN = { x: Math.round(G0.x * 10) / 10, z: Math.round(G0.z * 10) / 10, rx: 15, rz: 13 };
 export const CUP = { x: GREEN.x + 2.5, z: GREEN.z - 2 };
 // a short approach apron in front of the green; the rest of the play is over the sphere field (rough)
@@ -92,12 +92,24 @@ export function greenHeight(x, z) {
   const lx = x - GREEN.x, lz = z - GREEN.z;
   return GREEN_Y + 0.2 + lx * gcap(GSX) + lz * gcap(GSZ) + 0.06 * Math.exp(-((lx + 5) ** 2 + (lz - 3) ** 2) / 40);
 }
+// the raised tee: a level deck 22 m above the cup on a stone retaining wall (3 m faces) set on an earth mound, so the 179 yd
+// card plays shorter as the ball drops; stairs climb the back of the mound (away from the green)
+TEE.h = greenHeight(CUP.x, CUP.z) + 22.0;
+const BK = (() => { const dx = TEE.x - GREEN.x, dz = TEE.z - GREEN.z, l = Math.hypot(dx, dz); return { dx: dx / l, dz: dz / l }; })();
+export const PLATFORM = { x: TEE.x, z: TEE.z, w: TEE.w, d: TEE.d, top: TEE.h, wallH: 3.0, back: BK };
+export const PLAYS_YD = Math.round(HOLE_YD - (TEE.h - greenHeight(CUP.x, CUP.z)) * 1.09361);
+// the stair line: from the back edge of the deck straight out along `back` (the deck is axis-aligned, so it leaves the
+// face it crosses at that face's teeDist 0)
+const stairT0 = Math.min(Math.abs(BK.dx) > 1e-6 ? TEE.w / Math.abs(BK.dx) : 1e9, Math.abs(BK.dz) > 1e-6 ? TEE.d / Math.abs(BK.dz) : 1e9);
+export const STAIR = { x0: TEE.x + BK.dx * stairT0, z0: TEE.z + BK.dz * stairT0, len: 0, half: 0.9 };
 // small humps and hollows on the field between the big rolls
 const rollAt = (x, z) => 0.9 * (fbm(x * 0.03 + 4, z * 0.03) - 0.5);
 export function heightAt(x, z) {
   let h = realY(x, z) + rollAt(x, z);
   const fw = fairwayDist(x, z); h = lerp(h, realY(x, z) + rollAt(x, z) * 0.3, 1 - sstep(FAIRWAY_HALF, FAIRWAY_HALF + 14, fw));
-  const td = teeDist(x, z); h = lerp(h, TEE.h, 1 - sstep(0, TEE.bank, td + Math.max(0, td) * 0.5 * (fbm(x * 0.06 + 2, z * 0.06) - 0.5)));
+  const td = teeDist(x, z);
+  if (td < 1.2) h = td <= 0 ? TEE.h : TEE.h - 3.0 * td / 1.2;   // the deck, then the wall face
+  else h = lerp(h, TEE.h - 3.0, 1 - sstep(1.2, TEE.bank, td + (td - 1.2) * 0.5 * (fbm(x * 0.06 + 2, z * 0.06) - 0.5)));
   const gd = greenDist(x, z); h = lerp(h, greenHeight(x, z), 1 - sstep(3, 11, gd));
   return h;
 }
@@ -128,7 +140,7 @@ function inOutline(x, z) {
 // sphere-field density 0..1 at world (x, z): full inside the installation and fading out over ~120 m past it, never on the
 // tee, green or apron (job 40 plants the glowing spheres from this)
 export function sphereField(x, z) {
-  if (teeDist(x, z) < 4 || greenDist(x, z) < 3 || fairwayDist(x, z) < FAIRWAY_HALF + 1) return 0;
+  if (teeDist(x, z) < 6 || stairDist(x, z) < STAIR.half + 2 || greenDist(x, z) < 3 || fairwayDist(x, z) < FAIRWAY_HALF + 1) return 0;
   if (inOutline(x, z)) return 1;
   let d = 1e9; for (let i = 0; i < OUTLINE.length; i++) { const a = OUTLINE[i], b = OUTLINE[(i + 1) % OUTLINE.length]; d = Math.min(d, segDist(x, z, a.x, a.z, b.x, b.z)); }
   return 1 - sstep(10, 120, d);
@@ -136,4 +148,7 @@ export function sphereField(x, z) {
 // a few valley oaks on the hills, clear of the tee-to-green line (en metres, then to world)
 export const OAKS = [[-170, -120, 1.1], [-150, -40, 1.0], [-200, 30, 1.2], [40, -120, 0.95], [70, -40, 1.05], [10, 60, 1.0], [-120, 90, 1.1], [-260, -60, 1.15], [120, 40, 1.0], [-60, -230, 1.1], [60, 160, 0.95]]
   .map(([e, n, sc]) => ({ ...enToWorld(e, n), sc }))
-  .filter((t) => segDist(t.x, t.z, TEE.x, TEE.z, GREEN.x, GREEN.z) > 35);
+  .filter((t) => segDist(t.x, t.z, TEE.x, TEE.z, GREEN.x, GREEN.z) > 35 && Math.hypot(t.x - TEE.x, t.z - TEE.z) > 30);
+// stairs: 0.18 m rise / 0.32 m run from the back edge of the deck, down the wall and the mound until a step meets the ground
+{ let n = 0; while (n < 400 && TEE.h - (n + 1) * 0.18 > heightAt(STAIR.x0 + BK.dx * (n + 1) * 0.32, STAIR.z0 + BK.dz * (n + 1) * 0.32)) n++; STAIR.len = (n + 1) * 0.32; STAIR.steps = n + 1; }
+export function stairDist(x, z) { return STAIR.len ? segDist(x, z, STAIR.x0, STAIR.z0, STAIR.x0 + BK.dx * STAIR.len, STAIR.z0 + BK.dz * STAIR.len) : 1e9; }

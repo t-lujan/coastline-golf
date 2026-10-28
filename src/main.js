@@ -253,7 +253,7 @@ async function build() {
 }
 // par and yardage come from the course itself (centre-line length, tee -> dogleg corner -> cup)
 $('hole-text').textContent = `Hole ${HOLE_NO} · ${MAP.name} · Par ${PAR} · ${HOLE_YD} yd`;
-$('fly-sub').textContent = `Par ${PAR} · ${HOLE_YD} yd · ${MAP.cap}`;
+$('fly-sub').textContent = SENSORIO ? `Par ${PAR} · ${HOLE_YD} yd · plays ~${sensorio.PLAYS_YD} yd from the raised tee` : `Par ${PAR} · ${HOLE_YD} yd · ${MAP.cap}`;
 if (MAP_ID !== 'morro') {
   document.title = `Coastline Golf · ${MAP.name}`; $('scene').setAttribute('aria-label', BISHOP ? '3D golf hole below Bishop Peak, San Luis Obispo' : SENSORIO ? "3D par 3 across Bruce Munro's Field of Light at Sensorio, Paso Robles" : '3D golf hole down Pismo State Beach from the Pismo Pier to the Oceano Dunes');
   document.querySelector('#flytitle h2').textContent = MAP.name; document.querySelector('#loader h1').textContent = `Hole ${HOLE_NO} · ${MAP.name}`;
@@ -404,7 +404,8 @@ const aimYaw = () => (AIM_VIA && distToCup() > AIM_VIA.until && ball.p.z > AIM_V
 
 function autoClub() {
   if (ball.lie === 'green') return 'putter';
-  const d = distToCup() * YD;
+  // Sensorio's raised tee: the club is chosen for the plays-like yardage (the 22 m drop takes ~24 yd off)
+  const d = SENSORIO && ball.lie === 'tee' ? sensorio.PLAYS_YD : distToCup() * YD;
   // the wedge inside ~100 yd, and out of a bunker anywhere it can reach the green from
   if (d <= 100 || ball.lie === 'sand' && d <= 110) return 'wedge';
   if (d > 180 && ball.lie !== 'sand') return ball.lie === 'tee' ? 'driver' : d > 200 ? 'wood' : 'iron';
@@ -428,6 +429,11 @@ function aimPose(club = G.club, yaw = G.yaw) {
   const bias = BISHOP && onTee ? (camera.aspect > 1 ? 0.1 : 0.14) * ahead : PISMO && onTee ? -0.05 * ahead : 0;
   const lx = p.x + dx * ahead + dz * bias, lz = p.z + dz * ahead - dx * bias;
   const lk = new V3(lx, putt ? heightAt(lx, lz) : Math.max(onTee ? 0 : p.y, heightAt(lx, lz)) + 2.2 + ahead * 0.012, lz);
+  // Sensorio's raised tee: 8.5 m behind the ball, 3.2 m above the deck, looking down at the green
+  if (SENSORIO && onTee) {
+    pos.set(p.x - dx * 8.5, TEE.h + 3.2, p.z - dz * 8.5);
+    lk.set(GREEN.x, sensorio.greenHeight(GREEN.x, GREEN.z) + 1, GREEN.z);
+  }
   return { pos, look: lk };
 }
 // landing-zone preview: the camera hangs above and behind the predicted carry spot (default: last full-shot power)
@@ -628,15 +634,16 @@ function buildFlyover() {
     return;
   }
   if (SENSORIO) {
-    // high and behind the tee on the south-west knoll, over the tee and down across the field to the green, a turn round
-    // the flag, then back up the hole onto the tee aim view
+    // ~35 m behind and ~12 m above the raised tee looking at its deck and stone wall, then up over the rail and down across
+    // the field to the green, a turn round the flag, and back onto the tee aim view
     const dx = c.x - TEE.x, dz = c.z - TEE.z, L = Math.hypot(dx, dz), ux = dx / L, uz = dz / L, ty = TEE.h;
     const keys = [
-      [0.0, TEE.x - ux * 90, ty + 55, TEE.z - uz * 90, c.x, c.y, c.z],
-      [3.0, TEE.x - ux * 10, ty + 30, TEE.z - uz * 10, c.x, c.y, c.z],
-      [6.0, TEE.x + ux * L * 0.6 + uz * 25, ty + 22, TEE.z + uz * L * 0.6 - ux * 25, c.x, c.y, c.z],
-      [8.4, c.x + ux * 35 - uz * 20, c.y + 16, c.z + uz * 35 + ux * 20, c.x, c.y, c.z],
-      [12.0, e.x, e.y, e.z, l.x, l.y, l.z],
+      [0.0, TEE.x - ux * 35 + uz * 8, ty + 12, TEE.z - uz * 35 - ux * 8, TEE.x, ty - 1.5, TEE.z],
+      [2.6, TEE.x - ux * 12, ty + 9, TEE.z - uz * 12, TEE.x + ux * 30, ty - 4, TEE.z + uz * 30],
+      [4.6, TEE.x + ux * L * 0.35, ty + 6, TEE.z + uz * L * 0.35, c.x, c.y, c.z],
+      [7.0, c.x - ux * 30 + uz * 22, c.y + 12, c.z - uz * 30 - ux * 22, c.x, c.y, c.z],
+      [9.0, c.x + ux * 30 - uz * 18, c.y + 14, c.z + uz * 30 + ux * 18, c.x, c.y, c.z],
+      [13.3, e.x, e.y, e.z, l.x, l.y, l.z],
     ].map(([t, ...r]) => [t * k, ...r]);
     fly.path = keyPath(keys); fly.dur = keys[keys.length - 1][0]; fly.keys = keys;
     return;
@@ -1307,6 +1314,7 @@ if (TEST) {
     probe: TEST && BISHOP ? { fairwayDist, llToWorld: bishop.llToWorld } : null,
     get pismo() { return PISMO ? W0.pismoInfo || null : null; },
     get sensorio() { return SENSORIO ? W0.sensorioInfo || null : null; },
+    sensorioTee: SENSORIO ? { top: TEE.h, cupY: sensorio.greenHeight(CUP.x, CUP.z), plays: sensorio.PLAYS_YD, tris: null } : null,
     get pismoNature() { return PISMO ? { plants: plantStats(), clear: { fairway: pismo.FAIRWAY_HALF + 3, tee: 6, green: 6 }, trees: W0.trees.userData.spots.map((t) => ({ kind: t.kind, x: +t.x.toFixed(1), z: +t.z.toFixed(1), t: +(pismo.toeX(t.z) - t.x).toFixed(1) })), backdrop: W0.backdrop.userData.features, backdropCalls: 1, surf: { break: W0.water.uniforms.uBreak.value, pier: W0.water.uniforms.uPier.value.toArray() }, sand: pismoSandTransect(-120, pismo.shoreX) } : null; },
     TEE, CUP, bunkers: BUNKERS, pond: BISHOP ? bishop.POND : null, aimVia: AIM_VIA, heightAt,
     // Bishop Peak scene facts for the tests: the M draped on the hillside, the real-elevation heightmaps, the Inn's placement
@@ -1333,11 +1341,12 @@ if (TEST) {
     aimLinePts: (power, yaw) => { G.club = 'putter'; aimOv = { power, yaw }; updateAim(); aimOv = null; const m = W0.marker.position; return { pts: G.aimLinePts.map((p) => [p.x, p.z]), marker: [m.x, m.z], label: $('power-label').textContent, flat: flatPuttDist(power) }; },
     sim: (club, power, x, z, lie, yaw = 0, opts = {}) => {
       const b = new Ball(); b.place(x, z); if (lie) b.lie = lie; b.strike(club, power, yaw, opts.wind || { x: 0, z: 0 }, opts.curve || 0);
-      const fr = opts.frame || DT; let lip = 0, land = null;
-      for (let i = 0, n = Math.ceil(60 / fr); i < n && (b.state === 'flight' || b.state === 'roll'); i++) { b.step(fr); if (land === null && b.carry !== null) land = { x: b.p.x, z: b.p.z }; lip += b.events.filter((e) => e.type === 'lip').length; b.events.length = 0; }
+      const fr = opts.frame || DT, y0 = b.p.y; let lip = 0, land = null, flat = null;
+      for (let i = 0, n = Math.ceil(60 / fr); i < n && (b.state === 'flight' || b.state === 'roll'); i++) { b.step(fr); if (land === null && b.carry !== null) land = { x: b.p.x, z: b.p.z };
+        if (flat === null && b.state === 'flight' && b.v.y < 0 && b.p.y <= y0) flat = Math.hypot(b.p.x - x, b.p.z - z) * YD; /* carry back to launch height */ lip += b.events.filter((e) => e.type === 'lip').length; b.events.length = 0; }
       const tot = Math.hypot(b.p.x - x, b.p.z - z), dx = Math.sin(yaw), dz = -Math.cos(yaw), lx = b.p.x - x, lz = b.p.z - z;
       return { carry: b.carry * YD, total: tot * YD, roll: (tot - b.carry) * YD, end: surfaceAt(b.p.x, b.p.z), x: b.p.x, z: b.p.z, state: b.state, lip,
-        apex: b.apex * YD, descent: b.landAngle, lateral: (lx * -dz + lz * dx) * YD /* + = right of the aim line */, t: b.t,
+        apex: b.apex * YD, descent: b.landAngle, flatCarry: flat, lateral: (lx * -dz + lz * dx) * YD /* + = right of the aim line */, t: b.t,
         landLateral: land ? ((land.x - x) * -dz + (land.z - z) * dx) * YD : null /* same, at the first touchdown (before any roll) */ };
     },
     // a putt rolling at the cup from `dist` metres away (offset: sideways miss in metres) at `speed` m/s: does it drop or lip out?

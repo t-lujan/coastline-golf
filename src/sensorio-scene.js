@@ -2,7 +2,7 @@
 // (one instanced mesh of stemmed orbs for the near field, one additive point layer for the dense far glow), the pale
 // walking paths draped on the ground, and the small visitor buildings. Colours drift slowly in a wave across the field.
 import * as THREE from 'three';
-import { heightAt, enToWorld, sphereField, teeDist, greenDist, fairwayDist, FAIRWAY_HALF, GREEN, TEE } from './maps/sensorio.js';
+import { heightAt, enToWorld, sphereField, teeDist, greenDist, fairwayDist, FAIRWAY_HALF, GREEN, TEE, PLATFORM, STAIR, stairDist } from './maps/sensorio.js';
 
 // OSM footways (local east/north metres from the site centre)
 const PATHS = [
@@ -33,14 +33,79 @@ const PALETTE = /* glsl */`
     return c * (0.8 + 0.35 * sin(uTime * 1.3 + ph * 40.0));
   }`;
 
+// the raised tee's walk: from the stair foot 40 m on, turning toward the nearest OSM footway point
+function stairPath(paths) {
+  const B = PLATFORM.back, fx = STAIR.x0 + B.dx * STAIR.len, fz = STAIR.z0 + B.dz * STAIR.len;
+  let best = null, bd = 1e9; for (const p of paths) for (const c of p) { const d = Math.hypot(c.x - fx, c.z - fz); if (d < bd) { bd = d; best = c; } }
+  const mx = fx + B.dx * 12, mz = fz + B.dz * 12;
+  const dx = best.x - mx, dz = best.z - mz, l = Math.hypot(dx, dz) || 1, r = Math.min(28, l);
+  return [{ x: fx + B.dx * 0.6, z: fz + B.dz * 0.6 }, { x: mx, z: mz }, { x: mx + dx / l * r, z: mz + dz / l * r }];
+}
+// boxes pushed into one non-indexed buffer with per-box colour (top faces lit, sides shaded): the tee platform's parts
+function boxes(list) {
+  const v = [], c = [];
+  for (const { x0, x1, y0, y1, z0, z1, col } of list) {
+    const P = (i) => [i & 1 ? x1 : x0, i & 2 ? y1 : y0, i & 4 ? z1 : z0];
+    for (const [f, sh] of [[[2, 6, 7, 3], 1], [[0, 1, 5, 4], 0.4], [[0, 4, 6, 2], 0.7], [[1, 3, 7, 5], 0.7], [[0, 2, 3, 1], 0.8], [[4, 5, 7, 6], 0.8]]) {
+      for (const i of [f[0], f[1], f[2], f[0], f[2], f[3]]) { v.push(...P(i)); c.push(col.r * sh, col.g * sh, col.b * sh); }
+    }
+  }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); geo.setAttribute('color', new THREE.Float32BufferAttribute(c, 3));
+  return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true }));
+}
+// the raised tee: stone retaining wall (block-coursed faces + capstone lip), stairs down the back, and a railing on the sides
+// and back (the front edge stays open for the view to the green); three draw calls
+export function buildTeePlatform(group) {
+  const { x, z, w, d, top, wallH, back } = PLATFORM, foot = top - wallH, rnd = (k) => { const s = Math.sin(k * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+  const stone = new THREE.Color(0x4a4038), wall = [];
+  // the four faces in 0.5 m courses of ~1.2 m blocks, alternate courses offset half a block, each block a shade apart
+  const faces = [[x - w, x + w, z + d, 0, 1], [x - w, x + w, z - d, 0, -1], [z - d, z + d, x + w, 1, 1], [z - d, z + d, x - w, 1, -1]];
+  faces.forEach(([a, b, at, side, sg], fi) => {
+    for (let r = 0; r < wallH / 0.5; r++) {
+      const y0 = foot - 0.4 + r * 0.5, y1 = foot + (r + 1) * 0.5, n = Math.ceil((b - a) / 1.2);
+      for (let k = -1; k < n; k++) {
+        const s0 = Math.max(a, a + (k + (r % 2) * 0.5) * 1.2), s1 = Math.min(b, a + (k + 1 + (r % 2) * 0.5) * 1.2); if (s1 <= s0) continue;
+        const t = 0.82 + 0.3 * rnd(fi * 1000 + r * 50 + k), col = stone.clone().multiplyScalar(t), o0 = at + sg * 0.02, o1 = at + sg * 0.3;
+        const [p0, p1] = [Math.min(o0, o1), Math.max(o0, o1)];
+        wall.push(side ? { x0: p0, x1: p1, y0, y1, z0: s0 + 0.02, z1: s1 - 0.02, col } : { x0: s0 + 0.02, x1: s1 - 0.02, y0, y1, z0: p0, z1: p1, col });
+      }
+    }
+  });
+  const cap = stone.clone().multiplyScalar(1.25);
+  wall.push({ x0: x - w - 0.4, x1: x + w + 0.4, y0: top - 0.05, y1: top + 0.06, z0: z + d - 0.1, z1: z + d + 0.4, col: cap }, { x0: x - w - 0.4, x1: x + w + 0.4, y0: top - 0.05, y1: top + 0.06, z0: z - d - 0.4, z1: z - d + 0.1, col: cap },
+    { x0: x + w - 0.1, x1: x + w + 0.4, y0: top - 0.05, y1: top + 0.06, z0: z - d, z1: z + d, col: cap }, { x0: x - w - 0.4, x1: x - w + 0.1, y0: top - 0.05, y1: top + 0.06, z0: z - d, z1: z + d, col: cap });
+  const wallMesh = boxes(wall); wallMesh.name = 'teeWall';
+  // stairs: one slab per step, run along `back` (the deck sits square to the world axes and `back` is ~+z)
+  const pale = new THREE.Color(0xb8ae9c), st = [];
+  for (let i = 0; i < STAIR.steps; i++) {
+    const cx = STAIR.x0 + back.dx * (i + 0.5) * 0.32, cz = STAIR.z0 + back.dz * (i + 0.5) * 0.32, y1 = top - (i + 1) * 0.18 + 0.06;
+    st.push({ x0: cx - STAIR.half, x1: cx + STAIR.half, y0: Math.min(y1 - 0.3, heightAt(cx, cz) - 0.4), y1, z0: cz - 0.17, z1: cz + 0.17, col: pale.clone().multiplyScalar(0.9 + 0.15 * rnd(i)) });
+  }
+  const stairMesh = boxes(st); stairMesh.name = 'teeStairs';
+  // railing: posts every 2 m and a top rail on both sides and the back (gap at the stair head)
+  const metal = new THREE.Color(0x2a2a30), rl = [], ph = 1.05, pw = 0.035;
+  const post = (px, pz) => rl.push({ x0: px - pw, x1: px + pw, y0: top, y1: top + ph, z0: pz - pw, z1: pz + pw, col: metal });
+  const rail = (ax, az, bx, bz) => rl.push({ x0: Math.min(ax, bx) - 0.03, x1: Math.max(ax, bx) + 0.03, y0: top + ph - 0.05, y1: top + ph + 0.02, z0: Math.min(az, bz) - 0.03, z1: Math.max(az, bz) + 0.03, col: metal });
+  const bz = z + d * Math.sign(back.dz || 1) - 0.15 * Math.sign(back.dz || 1), fz = z - d * Math.sign(back.dz || 1);
+  for (const sx of [x - w + 0.15, x + w - 0.15]) { for (let t = 0; t <= 2 * d + 1e-6; t += 2) post(sx, Math.min(fz, bz) + t * (Math.abs(bz - fz) / (2 * d))); rail(sx, fz, sx, bz); }
+  const gap = STAIR.half + 0.15;
+  for (let t = 0; t <= 2 * w + 1e-6; t += 2) { const px = x - w + 0.15 + t * ((2 * w - 0.3) / (2 * w)); if (Math.abs(px - STAIR.x0) > gap) post(px, bz); }
+  post(STAIR.x0 - gap, bz); post(STAIR.x0 + gap, bz);
+  rail(x - w + 0.15, bz, STAIR.x0 - gap, bz); rail(STAIR.x0 + gap, bz, x + w - 0.15, bz);
+  const railMesh = boxes(rl); railMesh.name = 'teeRail';
+  group.add(wallMesh, stairMesh, railMesh);
+  group.userData.tee = { tris: [wallMesh, stairMesh, railMesh].map((m) => m.geometry.attributes.position.count / 3) };
+}
+
 export function createSensorioScene(qLevel = 'med') {
   const g = new THREE.Group(); g.name = 'sensorio';
   const uTime = { value: 0 };
   const nOrb = qLevel === 'low' ? 1100 : qLevel === 'high' ? 6000 : 2600, nPt = qLevel === 'low' ? 14000 : qLevel === 'high' ? 50000 : 32000, nNear = qLevel === 'low' ? 5000 : qLevel === 'high' ? 18000 : 12000;
   const paths = PATHS.map((p) => p.map(([e, n]) => enToWorld(e, n)));
+  paths.push(stairPath(paths));
   const pathDist = (x, z) => { let d = 1e9; for (const p of paths) for (let i = 0; i < p.length - 1; i++) d = Math.min(d, segD(x, z, p[i], p[i + 1])); return d; };
   // a spot is clear for an orb when the field wants one there and it is off the tee, green (+ collar), apron and paths
-  const clear = (x, z) => teeDist(x, z) > 5 && greenDist(x, z) > 4.5 && fairwayDist(x, z) > FAIRWAY_HALF + 2 && pathDist(x, z) > 2.6;
+  const clear = (x, z) => teeDist(x, z) > 5 && greenDist(x, z) > 4.5 && fairwayDist(x, z) > FAIRWAY_HALF + 2 && pathDist(x, z) > 2.6 && stairDist(x, z) > STAIR.half + 2;
   const R = { minX: -460, maxX: 460, minZ: -420, maxZ: 500 };
   const pick = (near) => {
     for (let k = 0; k < 40; k++) {
@@ -158,7 +223,8 @@ export function createSensorioScene(qLevel = 'med') {
   const bMesh = new THREE.Mesh(bGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
   g.add(bMesh);
 
-  g.userData.info = { qLevel, orbs, points, onGreen, onPath, paths: paths.length };
+  g.userData.info = { qLevel, orbs, points, onGreen, onPath, paths: PATHS.length };
+  buildTeePlatform(g);
   g.userData.update = (t) => { uTime.value = t; pts.material.uniforms.uScale.value = spill.material.uniforms.uScale.value = 420 * (window.innerHeight / 844); };
   return g;
 }
