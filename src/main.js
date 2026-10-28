@@ -149,7 +149,7 @@ async function build() {
   } else if (SENSORIO) {
     // no Rock, sea, wisps or boats: the scene dressing (the sphere field) lives in sensorio-scene.js; the hero framing reads
     // the hill behind the green as its "crest"
-    const ss = createSensorioScene(qLevel); scene.add(ss); W0.sensorioInfo = ss.userData.info;
+    const ss = createSensorioScene(qLevel); scene.add(ss); W0.sensorioInfo = ss.userData.info; W0.sensorio = ss;
     W0.crest = [];
     for (let x = GREEN.x - 120; x <= GREEN.x + 120; x += 10) for (let z = GREEN.z - 220; z <= GREEN.z - 60; z += 10) W0.crest.push(new V3(x, heightAt(x, z), z));
     W0.rock = null; W0.boats = inert();
@@ -204,7 +204,17 @@ async function build() {
   W0.trees = createTrees(qLevel, PISMO ? townTreeSpots() : SENSORIO ? sensorio.OAKS.map((t, i) => ({ kind: 'oak', x: t.x, z: t.z, sc: t.sc, pri: i })) : null); scene.add(W0.trees);
   // ball, effects
   W0.ballMesh = createBall(); scene.add(W0.ballMesh);
-  W0.tracer = new Ribbon(260, 0xf2fbfa, 0.6, 0.003, 0.016); scene.add(W0.tracer.mesh);
+  W0.tracer = new Ribbon(260, 0xf2fbfa, SENSORIO ? 1 : 0.6, SENSORIO ? 0.0045 : 0.003, 0.016); scene.add(W0.tracer.mesh);
+  if (SENSORIO) {
+    // night play over the field: the ball carries a soft white glow so it can be followed against the dark hills
+    W0.ballMesh.material.emissive.set(0xffffff); W0.ballMesh.material.emissiveIntensity = 0.9;
+    const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,0.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    halo.scale.setScalar(5); W0.ballMesh.add(halo);
+    // the green lit like a stage under the flag, so it reads against the dark field
+    const gl = new THREE.PointLight(0xd8ffd0, 260, 60, 1.2); gl.position.set(GREEN.x, heightAt(GREEN.x, GREEN.z) + 9, GREEN.z); scene.add(gl);
+  }
   W0.aimLine = new Ribbon(200, 0xe1f5f3, 0.7, 0.0022, 0.03); scene.add(W0.aimLine.mesh);
   W0.marker = createMarker(); scene.add(W0.marker);
   // putting break grid: short dashes on a lattice over the green that drift down the fall line (longer + faster = steeper)
@@ -270,6 +280,10 @@ function applyLook() {
     const keep = Math.min(0.9, look.cloud * 0.5 + look.fog * 0.8), low = 1 - THREE.MathUtils.smoothstep(sp.elevation, 4, 25);
     look.zen.lerp(tmpC.set('#5f93cc'), 0.7 * (1 - keep)); look.hor.lerp(tmpC.set('#e3e2d6').lerp(tmpC2.set('#efdcb6'), low * 0.6), 0.65 * (1 - keep));
   }
+  if (SENSORIO) {
+    // the Field of Light at dusk: a deep blue to violet sky with a faint orange glow low on the horizon
+    look.zen.set('#0b1238'); look.hor.set('#3a2a5c').lerp(tmpC.set('#c9743e'), 0.22);
+  }
   hemi.color.copy(look.hemiS); hemi.groundColor.copy(look.hemiG); hemi.intensity = look.hemiI * 0.78 * (1 + night * 0.15) * (1 + Math.max(0, Math.min(1, 1 - sp.elevation / 12)) * 0.7 * (1 - night));
   if (night > 0.5) { sun.color.set(0xa4bcff); sun.intensity = 2.1 * (1 - weather.cloud / 170); W0.lightDir = moonDir; }
   else { sun.color.copy(look.sun); sun.intensity = Math.max(0.05, look.sunI * 0.8); W0.lightDir = sunDir; }
@@ -297,6 +311,11 @@ function applyLook() {
   if (night > 0.5) { fill.color.set(0x7c94cc); fill.intensity = 0.55; }
   else { fill.color.copy(look.hor).lerp(new THREE.Color(0xffc08a), low * 0.6); fill.intensity = 0.25 + low * 0.75; }
   if (BISHOP && night < 0.5) { fill.color.lerp(tmpC.set('#d4dae0'), 0.6); fill.intensity = 0.25 + low * 0.35; }
+  if (SENSORIO) {
+    // low light so the orbs pop; a soft cool moon fill keeps the green and apron readable
+    hemi.color.set('#4a5a8c'); hemi.groundColor.set('#141020'); hemi.intensity = 0.55; sun.color.set('#9fb4ff'); sun.intensity = 0.7;
+    fill.color.set('#8aa0d8'); fill.intensity = 0.5; scene.fog.color.set('#2a2248'); renderer.toneMappingExposure = look.exp;
+  }
   W0.mist.uniforms.uCol.value.copy(look.hor).lerp(new THREE.Color(1, 1, 1), 0.35);
   const morning = night < 0.5 && sp.azimuth < 180 && sp.elevation < 22 ? 1 : 0;
   W0.mist.uniforms.uAmt.value = Math.max(weather.fogFactor * 0.85, morning * 0.55);
@@ -982,6 +1001,7 @@ function update(rdt) {
   const dt = rdt * G.timeScale; elapsed += rdt;
   windUniforms.uTime.value = elapsed; W0.water.uniforms.uTime.value = elapsed; TERRAIN_TIME.value = elapsed; W0.sky.uniforms.uTime.value = elapsed; W0.flag.uniforms.uTime.value = elapsed;
   W0.gulls.userData.update(elapsed); W0.boats.userData.update(elapsed);
+  if (W0.sensorio) W0.sensorio.userData.update(elapsed);
   W0.wisps.uniforms.uTime.value = elapsed; W0.mist.uniforms.uTime.value = elapsed;
   // the pin is pulled on hole-out so the flagstick never blocks the celebration shot
   updatePinPose(rdt);
@@ -1285,6 +1305,7 @@ if (TEST) {
     W0, surfY: () => W0.backdrop && W0.backdrop.userData.surfaceY, camera,
     probe: TEST && BISHOP ? { fairwayDist, llToWorld: bishop.llToWorld } : null,
     get pismo() { return PISMO ? W0.pismoInfo || null : null; },
+    get sensorio() { return SENSORIO ? W0.sensorioInfo || null : null; },
     get pismoNature() { return PISMO ? { plants: plantStats(), clear: { fairway: pismo.FAIRWAY_HALF + 3, tee: 6, green: 6 }, trees: W0.trees.userData.spots.map((t) => ({ kind: t.kind, x: +t.x.toFixed(1), z: +t.z.toFixed(1), t: +(pismo.toeX(t.z) - t.x).toFixed(1) })), backdrop: W0.backdrop.userData.features, backdropCalls: 1, surf: { break: W0.water.uniforms.uBreak.value, pier: W0.water.uniforms.uPier.value.toArray() }, sand: pismoSandTransect(-120, pismo.shoreX) } : null; },
     TEE, CUP, bunkers: BUNKERS, pond: BISHOP ? bishop.POND : null, aimVia: AIM_VIA, heightAt,
     // Bishop Peak scene facts for the tests: the M draped on the hillside, the real-elevation heightmaps, the Inn's placement
