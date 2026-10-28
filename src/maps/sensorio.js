@@ -146,7 +146,8 @@ export function sphereField(x, z) {
   return 1 - sstep(10, 120, d);
 }
 // a few valley oaks on the hills, clear of the tee-to-green line (en metres, then to world)
-export const OAKS = [[-170, -120, 1.1], [-150, -40, 1.0], [-200, 30, 1.2], [40, -120, 0.95], [70, -40, 1.05], [10, 60, 1.0], [-120, 90, 1.1], [-260, -60, 1.15], [120, 40, 1.0], [-60, -230, 1.1], [60, 160, 0.95]]
+export const OAKS = [[-170, -120, 1.1], [-150, -40, 1.0], [-200, 30, 1.2], [40, -120, 0.95], [70, -40, 1.05], [10, 60, 1.0], [-120, 90, 1.1], [-260, -60, 1.15], [120, 40, 1.0], [-60, -230, 1.1], [60, 160, 0.95],
+  [-230, -180, 1.0], [-300, 40, 1.15], [-220, 140, 0.9], [100, -200, 1.2], [150, -60, 1.05], [180, 120, 1.25], [-30, 200, 0.95], [-180, -260, 1.1], [30, -300, 1.0], [-320, -150, 1.2]]
   .map(([e, n, sc]) => ({ ...enToWorld(e, n), sc }))
   .filter((t) => segDist(t.x, t.z, TEE.x, TEE.z, GREEN.x, GREEN.z) > 35 && Math.hypot(t.x - TEE.x, t.z - TEE.z) > 30);
 // stairs: 0.18 m rise / 0.32 m run from the back edge of the deck, down the wall and the mound until a step meets the ground

@@ -95,6 +95,12 @@ export function bakeDepth(res = 256, hasRock = true) {
   return tex;
 }
 
+// Sensorio (style 'sensorio'): the inland ground, but the rough is dormant gold-tan dry grass with darker noise patches
+PALETTES.sensorio = { ...PALETTES.inland, ground: `vec3 rough = mix(vec3(0.20, 0.19, 0.11), vec3(0.32, 0.27, 0.15), nz) * (0.86 + nG * 0.2) * (0.9 + 0.2 * cgN2(vec2(p.x * 1.7, p.y * 5.3) + nF));
+        rough = mix(rough, vec3(0.17, 0.15, 0.09), smoothstep(0.55, 0.85, nB + nF * 0.25) * 0.5);
+        vec3 col = rough;
+        vec3 sn = normalize(cross(dFdx(vWP), dFdy(vWP)));
+        col = mix(col, vec3(0.16, 0.15, 0.09) * (0.8 + nF * 0.4), smoothstep(0.3, 0.6, 1.0 - abs(sn.y)) * 0.5);` };
 // Pismo's beach (style 'pismo'): pale buff/cream dry sand with wind ripples and tone drift on the dunes, a darker glossy
 // wet band over the ~30 m swash face (h 0..~1.4 m), a thin bright foam line at the waterline and an animated swash edge
 // that runs up and down the wet sand. The same band thresholds drive pismoSandTransect() for the tests.

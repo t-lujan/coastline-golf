@@ -109,7 +109,7 @@ async function build() {
     : SENSORIO ? { corridor: { minX: Math.min(TEE.x, GREEN.x) - 40, maxX: Math.max(TEE.x, GREEN.x) + 40, minZ: GREEN.z - 30, maxZ: TEE.z + 25 }, green: { minX: GREEN.x - 32, maxX: GREEN.x + 32, minZ: GREEN.z - 28, maxZ: GREEN.z + 30 } }
     : PISMO ? { corridor: { minX: -95, maxX: 65, minZ: -548, maxZ: -10 }, green: { minX: GREEN.x - 32, maxX: GREEN.x + 32, minZ: GREEN.z - 28, maxZ: GREEN.z + 30 } }
     : { corridor: { minX: -60, maxX: 80, minZ: -178, maxZ: 232 }, green: { minX: -28, maxX: 32, minZ: -165, maxZ: -115 } };
-  const style = BISHOP ? 'inland' : PISMO ? 'pismo' : 'coast';   // Sensorio: green coastal grass for now (job 40 restyles the field)
+  const style = BISHOP ? 'inland' : PISMO ? 'pismo' : SENSORIO ? 'sensorio' : 'coast';
   // Bishop's outer ground is mostly rough beyond the corridor patch (the real hills carry the detail): a lighter grid
   const tk = BISHOP ? 0.76 : 1;
   const baseColor = BISHOP ? landColor : null;
@@ -431,8 +431,10 @@ function aimPose(club = G.club, yaw = G.yaw) {
   const lk = new V3(lx, putt ? heightAt(lx, lz) : Math.max(onTee ? 0 : p.y, heightAt(lx, lz)) + 2.2 + ahead * 0.012, lz);
   // Sensorio's raised tee: 8.5 m behind the ball, 3.2 m above the deck, looking down at the green
   if (SENSORIO && onTee) {
-    pos.set(p.x - dx * 8.5, TEE.h + 3.2, p.z - dz * 8.5);
-    lk.set(GREEN.x, sensorio.greenHeight(GREEN.x, GREEN.z) + 1, GREEN.z);
+    // aimed a little short of the green so the drop and the glowing field below the deck fill the middle of the frame
+    const gy = sensorio.greenHeight(GREEN.x, GREEN.z), f = 0.72;
+    pos.set(p.x - dx * 7.5, TEE.h + 4.6, p.z - dz * 7.5);
+    lk.set(p.x + (GREEN.x - p.x) * f, TEE.h + (gy - TEE.h) * f - 1.5, p.z + (GREEN.z - p.z) * f);
   }
   return { pos, look: lk };
 }

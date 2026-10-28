@@ -2,7 +2,7 @@
 // (one instanced mesh of stemmed orbs for the near field, one additive point layer for the dense far glow), the pale
 // walking paths draped on the ground, and the small visitor buildings. Colours drift slowly in a wave across the field.
 import * as THREE from 'three';
-import { heightAt, enToWorld, sphereField, teeDist, greenDist, fairwayDist, FAIRWAY_HALF, GREEN, TEE, PLATFORM, STAIR, stairDist } from './maps/sensorio.js';
+import { heightAt, enToWorld, sphereField, teeDist, greenDist, fairwayDist, FAIRWAY_HALF, GREEN, TEE, PLATFORM, STAIR, stairDist, fbm, HOLE_YD, PAR } from './maps/sensorio.js';
 
 // OSM footways (local east/north metres from the site centre)
 const PATHS = [
@@ -30,6 +30,7 @@ const PALETTE = /* glsl */`
     vec3 c = hsv(h, 0.9, 1.0);
     c = mix(c, vec3(1.0, 0.62, 0.25), step(0.93, kind));                  // a few warm amber
     c = mix(c, vec3(0.92, 0.94, 1.0), step(0.86, kind) * step(kind, 0.93)); // and some white
+    c = mix(c, vec3(0.86, 0.78, 1.0), step(1.5, kind));                   // pale lilac (the green's frame)
     return c * (0.8 + 0.35 * sin(uTime * 1.3 + ph * 40.0));
   }`;
 
@@ -52,6 +53,30 @@ function boxes(list) {
   }
   const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); geo.setAttribute('color', new THREE.Float32BufferAttribute(c, 3));
   return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true }));
+}
+// the tee sign stands just outside the deck's left side near its front corner, facing back across the deck (u: along the panel)
+function teeSignSpot() {
+  const { x, z, w, d, back } = PLATFORM, fx = -back.dx, fz = -back.dz, lx = fz, lz = -fx;
+  const sx = Math.sign(lx) || -1;
+  return { x: x + sx * (w + 0.22), z: z + fz / Math.abs(fz || 1) * (d - 1.0), ux: 0, uz: 1, nx: -sx, nz: 0 };
+}
+function buildTeeSign(group) {
+  const sg = teeSignSpot(), cv = document.createElement('canvas'); cv.width = 256; cv.height = 170;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#5a4430'; c.fillRect(0, 0, 256, 170); c.fillStyle = '#121a33'; c.fillRect(7, 7, 242, 156);
+  c.fillStyle = '#efe6cf'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = 'bold 50px Georgia, serif'; c.fillText('HOLE 4', 128, 50);
+  c.font = '24px Georgia, serif'; c.fillText(`PAR ${PAR} · ${HOLE_YD} YDS`, 128, 98);
+  c.font = 'italic 24px Georgia, serif'; c.fillText('Field of Light', 128, 136);
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.6), new THREE.MeshBasicMaterial({ map: tex, color: 0x9a9080, fog: false }));
+  panel.position.set(sg.x + sg.nx * 0.06, PLATFORM.top + 0.95, sg.z + sg.nz * 0.06); panel.rotation.y = Math.atan2(sg.nx, sg.nz); panel.name = 'teeSign';
+  // a small warm downlight pooled on the panel face
+  const gc = document.createElement('canvas'); gc.width = gc.height = 64; const gx = gc.getContext('2d'), gr = gx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,214,150,0.55)'); gr.addColorStop(1, 'rgba(255,214,150,0)'); gx.fillStyle = gr; gx.fillRect(0, 0, 64, 64);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(gc), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, fog: false }));
+  glow.position.set(sg.x + sg.nx * 0.2, PLATFORM.top + 1.15, sg.z + sg.nz * 0.2); glow.scale.set(1.3, 1.0, 1); glow.name = 'teeSignGlow';
+  group.add(panel, glow);
 }
 // the raised tee: stone retaining wall (block-coursed faces + capstone lip), stairs down the back, and a railing on the sides
 // and back (the front edge stays open for the view to the green); three draw calls
@@ -92,61 +117,83 @@ export function buildTeePlatform(group) {
   for (let t = 0; t <= 2 * w + 1e-6; t += 2) { const px = x - w + 0.15 + t * ((2 * w - 0.3) / (2 * w)); if (Math.abs(px - STAIR.x0) > gap) post(px, bz); }
   post(STAIR.x0 - gap, bz); post(STAIR.x0 + gap, bz);
   rail(x - w + 0.15, bz, STAIR.x0 - gap, bz); rail(STAIR.x0 + gap, bz, x + w - 0.15, bz);
+  // the tee sign's two timber posts on the capstone lip at the deck's front-left corner (the panel itself is added below)
+  const sg = teeSignSpot(), timber = new THREE.Color(0x2e2218);
+  for (const o of [-0.38, 0.38]) { const px = sg.x + sg.ux * o, pz = sg.z + sg.uz * o; rl.push({ x0: px - 0.05, x1: px + 0.05, y0: top - 0.3, y1: top + 1.3, z0: pz - 0.05, z1: pz + 0.05, col: timber }); }
   const railMesh = boxes(rl); railMesh.name = 'teeRail';
-  group.add(wallMesh, stairMesh, railMesh);
+  group.add(wallMesh, stairMesh, railMesh); buildTeeSign(group);
   group.userData.tee = { tris: [wallMesh, stairMesh, railMesh].map((m) => m.geometry.attributes.position.count / 3) };
 }
 
 export function createSensorioScene(qLevel = 'med') {
   const g = new THREE.Group(); g.name = 'sensorio';
   const uTime = { value: 0 };
-  const nOrb = qLevel === 'low' ? 1100 : qLevel === 'high' ? 6000 : 2600, nPt = qLevel === 'low' ? 14000 : qLevel === 'high' ? 50000 : 32000, nNear = qLevel === 'low' ? 5000 : qLevel === 'high' ? 18000 : 12000;
+  const nOrb = qLevel === 'low' ? 1600 : qLevel === 'high' ? 8000 : 4000, nPt = qLevel === 'low' ? 14000 : qLevel === 'high' ? 50000 : 32000, nNear = qLevel === 'low' ? 5000 : qLevel === 'high' ? 18000 : 12000;
   const paths = PATHS.map((p) => p.map(([e, n]) => enToWorld(e, n)));
   paths.push(stairPath(paths));
   const pathDist = (x, z) => { let d = 1e9; for (const p of paths) for (let i = 0; i < p.length - 1; i++) d = Math.min(d, segD(x, z, p[i], p[i + 1])); return d; };
   // a spot is clear for an orb when the field wants one there and it is off the tee, green (+ collar), apron and paths
   const clear = (x, z) => teeDist(x, z) > 5 && greenDist(x, z) > 4.5 && fairwayDist(x, z) > FAIRWAY_HALF + 2 && pathDist(x, z) > 2.6 && stairDist(x, z) > STAIR.half + 2;
+  // orbs gather in sweeping rows along the hill contours (a band every ~1.5 m of elevation) in broad patches, gaps between
+  const sst = (a, b, v) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const cluster = (x, z) => (0.35 + 0.65 * sst(0.25, 0.75, 0.5 + 0.5 * Math.sin(heightAt(x, z) * 4.19))) * (0.5 + 0.5 * Math.min(1, Math.max(0, fbm(x * 0.02, z * 0.02))));
   const R = { minX: -460, maxX: 460, minZ: -420, maxZ: 500 };
   const pick = (near) => {
     for (let k = 0; k < 40; k++) {
       let x, z;
       if (near) { const a = Math.random() * 6.283, r = 10 + Math.sqrt(Math.random()) * 200, cx = (TEE.x + GREEN.x) / 2, cz = (TEE.z + GREEN.z) / 2; x = cx + Math.cos(a) * r; z = cz + Math.sin(a) * r * 1.2; }
       else { x = R.minX + Math.random() * (R.maxX - R.minX); z = R.minZ + Math.random() * (R.maxZ - R.minZ); }
-      if (Math.random() > sphereField(x, z) * 0.97 + 0.03 || !clear(x, z)) continue;
+      if (Math.random() > (sphereField(x, z) * 0.97 + 0.03) * cluster(x, z) || !clear(x, z)) continue;
       return { x, z };
     }
     return null;
   };
 
   // near field: low-poly orbs on short stems, one instanced draw (orb verts carry glow 1, stem verts 0)
-  const orb = new THREE.IcosahedronGeometry(0.2, 0); orb.translate(0, 0.85, 0);
-  const stem = new THREE.CylinderGeometry(0.012, 0.012, 0.8, 3, 1, true); stem.translate(0, 0.4, 0);
+  // unit orb and unit-height stem; each instance carries its orb radius and stem height (aDim) and the shader sizes them
+  const orb = new THREE.IcosahedronGeometry(1, 0);
+  const stem = new THREE.CylinderGeometry(0.018, 0.018, 1, 3, 1, true); stem.translate(0, 0.5, 0);
   const pos = [...orb.toNonIndexed().attributes.position.array, ...stem.toNonIndexed().attributes.position.array];
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   const no = orb.toNonIndexed().attributes.position.count, glow = new Float32Array(pos.length / 3).fill(0).map((_, i) => (i < no ? 1 : 0));
   geo.setAttribute('aGlow', new THREE.Float32BufferAttribute(glow, 1));
-  const ph = new Float32Array(nOrb * 2), mesh = new THREE.InstancedMesh(geo, null, nOrb);
+  const nRing = 28, cap = nOrb + nRing, ph = new Float32Array(cap * 2), dim = new Float32Array(cap * 2), mesh = new THREE.InstancedMesh(geo, null, cap);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
   let orbs = 0, onGreen = 0, onPath = 0;
   for (let i = 0; i < nOrb; i++) {
     const at = pick(i < nOrb * 0.75); if (!at) continue;
-    const sc = 0.8 + Math.random() * 0.5;
-    mesh.setMatrixAt(orbs, m.compose(p.set(at.x, heightAt(at.x, at.z) - 0.05, at.z), q, s.set(sc, sc * (0.8 + Math.random() * 0.4), sc)));
+    const u = Math.random();
+    mesh.setMatrixAt(orbs, m.compose(p.set(at.x, heightAt(at.x, at.z) - 0.05, at.z), q, s.set(1, 1, 1)));
     ph[orbs * 2] = Math.random(); ph[orbs * 2 + 1] = Math.random();
+    dim[orbs * 2] = u < 0.5 ? 0.14 : u < 0.85 ? 0.22 : 0.32; dim[orbs * 2 + 1] = 0.55 + Math.random() * 0.8;
     if (greenDist(at.x, at.z) < 0) onGreen++; if (pathDist(at.x, at.z) < 1.25) onPath++;
     orbs++;
   }
+  // the green's frame: larger white / pale-lilac orbs arcing round the back half, 7-10 m outside the edge (front left open)
+  const bx = -(TEE.x - GREEN.x), bz = -(TEE.z - GREEN.z), b0 = Math.atan2(bz, bx);
+  let ring = 0;
+  for (let i = 0; i < nRing; i++) {
+    const a = b0 + (i / (nRing - 1) - 0.5) * Math.PI * 0.92, cx = Math.cos(a), cz = Math.sin(a), re = 1 / Math.hypot(cx / GREEN.rx, cz / GREEN.rz);
+    const r = re + 7 + 3 * Math.random(), x = GREEN.x + cx * r, z = GREEN.z + cz * r;
+    if (pathDist(x, z) < 2.6) continue;
+    mesh.setMatrixAt(orbs, m.compose(p.set(x, heightAt(x, z) - 0.05, z), q, s.set(1, 1, 1)));
+    ph[orbs * 2] = Math.random(); ph[orbs * 2 + 1] = i % 2 ? 0.9 : 2.0; dim[orbs * 2] = 0.3; dim[orbs * 2 + 1] = 1.0;
+    if (greenDist(x, z) < 0) onGreen++;
+    orbs++; ring++;
+  }
   mesh.count = orbs;
   geo.setAttribute('aPh', new THREE.InstancedBufferAttribute(ph, 2));
+  geo.setAttribute('aDim', new THREE.InstancedBufferAttribute(dim, 2));
   mesh.material = new THREE.ShaderMaterial({
     uniforms: { uTime }, fog: false,
     vertexShader: /* glsl */`
-      attribute float aGlow; attribute vec2 aPh; varying vec3 vC;
+      attribute float aGlow; attribute vec2 aPh; attribute vec2 aDim; varying vec3 vC;
       ${PALETTE}
       void main(){
-        vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.);
-        vC = mix(vec3(0.03, 0.03, 0.05), orbCol(wp.xyz, aPh.x, aPh.y) * 1.6, aGlow);
+        vec3 lp = aGlow > 0.5 ? position * aDim.x + vec3(0., aDim.y + aDim.x * 0.6, 0.) : vec3(position.x, position.y * aDim.y, position.z);
+        vec4 wp = modelMatrix * instanceMatrix * vec4(lp, 1.);
+        vC = mix(vec3(0.10, 0.09, 0.13), orbCol(wp.xyz, aPh.x, aPh.y) * 1.6, aGlow);
         gl_Position = projectionMatrix * viewMatrix * wp;
       }`,
     fragmentShader: /* glsl */`varying vec3 vC; void main(){ gl_FragColor = vec4(vC, 1.); }`,
@@ -165,13 +212,13 @@ export function createSensorioScene(qLevel = 'med') {
   const pg = new THREE.BufferGeometry();
   pg.setAttribute('position', new THREE.BufferAttribute(pp.subarray(0, points * 3), 3));
   pg.setAttribute('aPh', new THREE.BufferAttribute(pa.subarray(0, points * 2), 2));
-  const ptMat = (size, maxPx, gain, core, drop) => new THREE.ShaderMaterial({
+  const ptMat = (size, maxPx, gain, core, drop, fixed = null) => new THREE.ShaderMaterial({
     uniforms: { uTime, uScale: { value: 420 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
     vertexShader: /* glsl */`
       attribute vec2 aPh; uniform float uScale; varying vec3 vC;
       ${PALETTE}
       void main(){
-        vC = orbCol(position, aPh.x, aPh.y);
+        vC = ${fixed ? `vec3(${fixed.map((v) => v.toFixed(2)).join(', ')})` : 'orbCol(position, aPh.x, aPh.y)'};
         vec4 mv = viewMatrix * vec4(position - vec3(0., ${drop.toFixed(2)}, 0.), 1.); gl_Position = projectionMatrix * mv;
         gl_PointSize = clamp(uScale * ${size.toFixed(2)} / -mv.z, 1.5, ${maxPx.toFixed(1)});
         vC *= clamp(1.4 - (-mv.z) / 900.0, 0.45, 1.2);
@@ -189,7 +236,7 @@ export function createSensorioScene(qLevel = 'med') {
   spill.frustumCulled = false; g.add(spill);
 
   // paths: pale ~2.5 m ribbons draped on the ground, one mesh
-  const pv = [], pi = [];
+  const pv = [], pi = [], ev = [];
   for (const path of paths) {
     const pts2 = [];
     for (let i = 0; i < path.length - 1; i++) {
@@ -201,30 +248,44 @@ export function createSensorioScene(qLevel = 'med') {
       const a = pts2[Math.max(0, i - 1)], b = pts2[Math.min(pts2.length - 1, i + 1)], dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1, nx = -dz / l * 1.25, nz = dx / l * 1.25;
       const v0 = pv.length / 3;
       for (const sd of [-1, 1]) { const x = c.x + nx * sd, z = c.z + nz * sd; pv.push(x, heightAt(x, z) + 0.12, z); }
+      if (i % 2 === 0) for (const sd of [-1, 1]) { const x = c.x + nx * sd * 1.2, z = c.z + nz * sd * 1.2; ev.push(x, heightAt(x, z) + 0.25, z); }
       if (i > 0) pi.push(v0 - 2, v0 - 1, v0, v0 - 1, v0 + 1, v0);
     });
   }
   const pathGeo = new THREE.BufferGeometry(); pathGeo.setAttribute('position', new THREE.Float32BufferAttribute(pv, 3)); pathGeo.setIndex(pi);
   const pathMesh = new THREE.Mesh(pathGeo, new THREE.MeshBasicMaterial({ color: 0x8a8296, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 }));
   g.add(pathMesh);
+  // path edge lights: a small warm-white glow every 5 m along both edges, one point layer
+  const eg = new THREE.BufferGeometry(); eg.setAttribute('position', new THREE.Float32BufferAttribute(ev, 3)); eg.setAttribute('aPh', new THREE.Float32BufferAttribute(new Float32Array(ev.length / 3 * 2), 2));
+  const edge = new THREE.Points(eg, ptMat(0.35, 14, 1.0, 6, 0, [1.0, 0.85, 0.6])); edge.frustumCulled = false; edge.name = 'pathLights'; g.add(edge);
 
-  // the visitor buildings: dark low boxes (merged), their windows warm
-  const bv = [], bc = [];
-  for (const b of BUILDINGS) {
-    const w = b.map(([e, n]) => enToWorld(e, n)), y0 = Math.min(...w.map((c) => heightAt(c.x, c.z))) - 0.5, y1 = y0 + 4.5;
-    const wall = (a, c, warm) => {
-      const col = warm ? [1.0, 0.62, 0.3] : [0.05, 0.05, 0.07];
-      for (const [x, y, z] of [[a.x, y0, a.z], [c.x, y0, c.z], [c.x, y1, c.z], [a.x, y0, a.z], [c.x, y1, c.z], [a.x, y1, a.z]]) { bv.push(x, y, z); bc.push(...(y === y1 || !warm ? [0.05, 0.05, 0.07] : col)); }
-    };
-    for (let i = 0; i < 4; i++) wall(w[i], w[(i + 1) % 4], i % 2 === 0);
-    for (const [a, c, d] of [[0, 1, 2], [0, 2, 3]]) for (const k of [a, c, d]) { bv.push(w[k].x, y1, w[k].z); bc.push(0.05, 0.05, 0.07); }
+  // the visitor buildings: 4 m dark walls under a low gable roof (0.6 m eaves), a lit doorway and three lit windows per long wall
+  const bv = [], bc = [], DARK = [0.05, 0.05, 0.07], ROOF = [0.08, 0.075, 0.09], WARM = [1.0, 0.68, 0.34];
+  const quad = (a, b, c, d, col) => { for (const v of [a, b, c, a, c, d]) { bv.push(...v); bc.push(...col); } };
+  for (const bl of BUILDINGS) {
+    const w = bl.map(([e, n]) => enToWorld(e, n)), y0 = Math.min(...w.map((c) => heightAt(c.x, c.z))) - 0.5, y1 = y0 + 4.0, yr = y1 + 1.6;
+    const cx = w.reduce((t, c) => t + c.x, 0) / 4, cz = w.reduce((t, c) => t + c.z, 0) / 4;
+    const e01 = Math.hypot(w[1].x - w[0].x, w[1].z - w[0].z), e12 = Math.hypot(w[2].x - w[1].x, w[2].z - w[1].z), lng = e01 >= e12;
+    const ua = lng ? w[1] : w[2], ub = lng ? w[0] : w[1], L = (lng ? e01 : e12) / 2, S = (lng ? e12 : e01) / 2;
+    const ux = (ua.x - ub.x) / (2 * L), uz = (ua.z - ub.z) / (2 * L), vx = -uz, vz = ux;   // u along the ridge, v across
+    const P = (l, sv, y) => [cx + ux * l + vx * sv, y, cz + uz * l + vz * sv];
+    for (const sv of [-1, 1]) {
+      quad(P(-L, sv * S, y0), P(L, sv * S, y0), P(L, sv * S, y1), P(-L, sv * S, y1), DARK);            // long walls
+      quad(P(sv * L, -S, y0), P(sv * L, S, y0), P(sv * L, S, y1), P(sv * L, -S, y1), DARK);            // end walls
+      for (const v of [P(sv * L, -S, y1), P(sv * L, S, y1), P(sv * L, 0, yr)]) { bv.push(...v); bc.push(...DARK); }   // gables
+      const eY = y1 - 0.6 * 1.6 / S;
+      quad(P(-L - 0.6, sv * (S + 0.6), eY), P(L + 0.6, sv * (S + 0.6), eY), P(L + 0.6, 0, yr), P(-L - 0.6, 0, yr), ROOF);   // roof slopes
+      const o = sv * (S + 0.04);
+      for (const k of [-0.6, 0, 0.6]) { const l = k * L; quad(P(l - 0.5, o, y0 + 1.9), P(l + 0.5, o, y0 + 1.9), P(l + 0.5, o, y0 + 2.9), P(l - 0.5, o, y0 + 2.9), WARM); }
+      if (sv > 0) { const l = -0.3 * L + 0.9; quad(P(l - 0.6, o, y0 + 0.5), P(l + 0.6, o, y0 + 0.5), P(l + 0.6, o, y0 + 2.7), P(l - 0.6, o, y0 + 2.7), WARM); }   // doorway (from ground level)
+    }
   }
   const bGeo = new THREE.BufferGeometry(); bGeo.setAttribute('position', new THREE.Float32BufferAttribute(bv, 3)); bGeo.setAttribute('color', new THREE.Float32BufferAttribute(bc, 3));
   const bMesh = new THREE.Mesh(bGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
   g.add(bMesh);
 
-  g.userData.info = { qLevel, orbs, points, onGreen, onPath, paths: PATHS.length };
+  g.userData.info = { qLevel, orbs, ring, points, edgeLights: ev.length / 3, onGreen, onPath, paths: PATHS.length };
   buildTeePlatform(g);
-  g.userData.update = (t) => { uTime.value = t; pts.material.uniforms.uScale.value = spill.material.uniforms.uScale.value = 420 * (window.innerHeight / 844); };
+  g.userData.update = (t) => { uTime.value = t; pts.material.uniforms.uScale.value = spill.material.uniforms.uScale.value = edge.material.uniforms.uScale.value = 420 * (window.innerHeight / 844); };
   return g;
 }
