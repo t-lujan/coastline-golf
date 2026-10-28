@@ -27,7 +27,7 @@ const PALETTE = /* glsl */`
   vec3 orbCol(vec3 wp, float ph, float kind){
     float w = sin(wp.x * 0.018 + wp.z * 0.011 - uTime * 0.35) * 0.5 + 0.5;
     float h = 0.5 + 0.45 * fract(ph + w * 0.55 + uTime * 0.012);          // 0.5 cyan .. 0.95 pink
-    vec3 c = hsv(h, 0.78, 1.0);
+    vec3 c = hsv(h, 0.9, 1.0);
     c = mix(c, vec3(1.0, 0.62, 0.25), step(0.93, kind));                  // a few warm amber
     c = mix(c, vec3(0.92, 0.94, 1.0), step(0.86, kind) * step(kind, 0.93)); // and some white
     return c * (0.8 + 0.35 * sin(uTime * 1.3 + ph * 40.0));
@@ -36,7 +36,7 @@ const PALETTE = /* glsl */`
 export function createSensorioScene(qLevel = 'med') {
   const g = new THREE.Group(); g.name = 'sensorio';
   const uTime = { value: 0 };
-  const nOrb = qLevel === 'low' ? 1100 : qLevel === 'high' ? 6000 : 2600, nPt = qLevel === 'low' ? 14000 : qLevel === 'high' ? 50000 : 32000;
+  const nOrb = qLevel === 'low' ? 1100 : qLevel === 'high' ? 6000 : 2600, nPt = qLevel === 'low' ? 14000 : qLevel === 'high' ? 50000 : 32000, nNear = qLevel === 'low' ? 5000 : qLevel === 'high' ? 18000 : 12000;
   const paths = PATHS.map((p) => p.map(([e, n]) => enToWorld(e, n)));
   const pathDist = (x, z) => { let d = 1e9; for (const p of paths) for (let i = 0; i < p.length - 1; i++) d = Math.min(d, segD(x, z, p[i], p[i + 1])); return d; };
   // a spot is clear for an orb when the field wants one there and it is off the tee, green (+ collar), apron and paths
@@ -54,7 +54,7 @@ export function createSensorioScene(qLevel = 'med') {
   };
 
   // near field: low-poly orbs on short stems, one instanced draw (orb verts carry glow 1, stem verts 0)
-  const orb = new THREE.IcosahedronGeometry(0.16, 0); orb.translate(0, 0.85, 0);
+  const orb = new THREE.IcosahedronGeometry(0.2, 0); orb.translate(0, 0.85, 0);
   const stem = new THREE.CylinderGeometry(0.012, 0.012, 0.8, 3, 1, true); stem.translate(0, 0.4, 0);
   const pos = [...orb.toNonIndexed().attributes.position.array, ...stem.toNonIndexed().attributes.position.array];
   const geo = new THREE.BufferGeometry();
@@ -88,10 +88,11 @@ export function createSensorioScene(qLevel = 'med') {
   });
   mesh.frustumCulled = false; g.add(mesh);
 
-  // far / dense glow: one additive point layer, round soft sprites with size attenuation
-  const pp = new Float32Array(nPt * 3), pa = new Float32Array(nPt * 2); let points = 0;
-  for (let i = 0; i < nPt; i++) {
-    const at = pick(false); if (!at) continue;
+  // dense glow: one additive point layer (the whole field plus an extra carpet in the near field), round soft sprites sized in
+  // world metres so the near orbs are big soft blooms and the far ones a fine glitter
+  const nAll = nPt + nNear, pp = new Float32Array(nAll * 3), pa = new Float32Array(nAll * 2); let points = 0;
+  for (let i = 0; i < nAll; i++) {
+    const at = pick(i >= nPt); if (!at) continue;
     pp.set([at.x, heightAt(at.x, at.z) + 0.8, at.z], points * 3); pa.set([Math.random(), Math.random()], points * 2);
     if (greenDist(at.x, at.z) < 0) onGreen++; if (pathDist(at.x, at.z) < 1.25) onPath++;
     points++;
@@ -99,22 +100,28 @@ export function createSensorioScene(qLevel = 'med') {
   const pg = new THREE.BufferGeometry();
   pg.setAttribute('position', new THREE.BufferAttribute(pp.subarray(0, points * 3), 3));
   pg.setAttribute('aPh', new THREE.BufferAttribute(pa.subarray(0, points * 2), 2));
-  const pts = new THREE.Points(pg, new THREE.ShaderMaterial({
+  const ptMat = (size, maxPx, gain, core, drop) => new THREE.ShaderMaterial({
     uniforms: { uTime, uScale: { value: 420 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
     vertexShader: /* glsl */`
       attribute vec2 aPh; uniform float uScale; varying vec3 vC;
       ${PALETTE}
       void main(){
         vC = orbCol(position, aPh.x, aPh.y);
-        vec4 mv = viewMatrix * vec4(position, 1.); gl_Position = projectionMatrix * mv;
-        gl_PointSize = clamp(uScale * 0.5 / -mv.z, 1.5, 14.0);
+        vec4 mv = viewMatrix * vec4(position - vec3(0., ${drop.toFixed(2)}, 0.), 1.); gl_Position = projectionMatrix * mv;
+        gl_PointSize = clamp(uScale * ${size.toFixed(2)} / -mv.z, 1.5, ${maxPx.toFixed(1)});
         vC *= clamp(1.4 - (-mv.z) / 900.0, 0.45, 1.2);
       }`,
     fragmentShader: /* glsl */`
       varying vec3 vC;
-      void main(){ vec2 d = gl_PointCoord - 0.5; float r = dot(d, d) * 4.0; if (r > 1.0) discard; float a = exp(-r * 3.0); gl_FragColor = vec4(vC * a * 1.3, 1.); }`,
-  }));
+      void main(){ vec2 d = gl_PointCoord - 0.5; float r = dot(d, d) * 4.0; if (r > 1.0) discard;
+        float a = exp(-r * ${core.toFixed(1)}) + 0.22 * exp(-r * 1.6) * (1.0 - r); gl_FragColor = vec4(vC * a * ${gain.toFixed(2)}, 1.); }`,
+  });
+  // the orbs: a bright core with a soft halo (~0.9 m across)
+  const pts = new THREE.Points(pg, ptMat(1.0, 34, 1.15, 8, 0));
   pts.frustumCulled = false; g.add(pts);
+  // and the faint coloured light each one spills on the ground round it (a wide, dim second layer on the same points)
+  const spill = new THREE.Points(pg, ptMat(4.0, 90, 0.06, 2, 0.7));
+  spill.frustumCulled = false; g.add(spill);
 
   // paths: pale ~2.5 m ribbons draped on the ground, one mesh
   const pv = [], pi = [];
@@ -152,6 +159,6 @@ export function createSensorioScene(qLevel = 'med') {
   g.add(bMesh);
 
   g.userData.info = { qLevel, orbs, points, onGreen, onPath, paths: paths.length };
-  g.userData.update = (t) => { uTime.value = t; pts.material.uniforms.uScale.value = 420 * (window.innerHeight / 844); };
+  g.userData.update = (t) => { uTime.value = t; pts.material.uniforms.uScale.value = spill.material.uniforms.uScale.value = 420 * (window.innerHeight / 844); };
   return g;
 }

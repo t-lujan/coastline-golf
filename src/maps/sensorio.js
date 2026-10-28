@@ -67,7 +67,14 @@ export const ROCK = { x: 1e5, z: 1e5, rx: 1, rz: 1, h: 1 };
 export const STACKS = [];
 export const GULLS = { x: GREEN.x, z: GREEN.z };
 
-export function fairwayDist(x, z) { let d = 1e9; for (let i = 0; i < FAIRWAY.length - 1; i++) d = Math.min(d, segDist(x, z, ...FAIRWAY[i], ...FAIRWAY[i + 1])); return d; }
+// the apron is a short, rounded, irregular tongue of fairway in front of the green: wider where it meets the collar, narrowing
+// back toward the tee, with a slow wobble on the edge so it melts into the rough instead of reading as a striped rectangle
+export function fairwayDist(x, z) {
+  const [a, b] = FAIRWAY, vx = b[0] - a[0], vz = b[1] - a[1], t = Math.max(0, Math.min(1, ((x - a[0]) * vx + (z - a[1]) * vz) / (vx * vx + vz * vz)));
+  const d = segDist(x, z, ...a, ...b), half = FAIRWAY_HALF * (0.62 + 0.38 * Math.sqrt(t));
+  const wob = 1.7 * Math.sin(x * 0.19 + z * 0.07) + 1.1 * Math.sin(z * 0.23 - x * 0.11 + 1.3) + 0.6 * Math.sin(x * 0.41 + z * 0.37 + 2.1);
+  return d + FAIRWAY_HALF - half - wob;
+}
 export function greenDist(x, z) { const dx = (x - GREEN.x) / GREEN.rx, dz = (z - GREEN.z) / GREEN.rz; return (Math.hypot(dx, dz) - 1) * Math.min(GREEN.rx, GREEN.rz); }
 export const bunkerDist = () => 1e9;
 export function teeDist(x, z) { return Math.max(Math.abs(x - TEE.x) - TEE.w, Math.abs(z - TEE.z) - TEE.d); }

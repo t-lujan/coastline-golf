@@ -204,7 +204,7 @@ async function build() {
   W0.trees = createTrees(qLevel, PISMO ? townTreeSpots() : SENSORIO ? sensorio.OAKS.map((t, i) => ({ kind: 'oak', x: t.x, z: t.z, sc: t.sc, pri: i })) : null); scene.add(W0.trees);
   // ball, effects
   W0.ballMesh = createBall(); scene.add(W0.ballMesh);
-  W0.tracer = new Ribbon(260, 0xf2fbfa, SENSORIO ? 1 : 0.6, SENSORIO ? 0.0045 : 0.003, 0.016); scene.add(W0.tracer.mesh);
+  W0.tracer = new Ribbon(260, 0xf2fbfa, SENSORIO ? 0.8 : 0.6, 0.003, 0.016); scene.add(W0.tracer.mesh);
   if (SENSORIO) {
     // night play over the field: the ball carries a soft white glow so it can be followed against the dark hills
     W0.ballMesh.material.emissive.set(0xffffff); W0.ballMesh.material.emissiveIntensity = 0.9;
@@ -212,8 +212,8 @@ async function build() {
     gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,0.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
     const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
     halo.scale.setScalar(5); W0.ballMesh.add(halo);
-    // the green lit like a stage under the flag, so it reads against the dark field
-    const gl = new THREE.PointLight(0xd8ffd0, 260, 60, 1.2); gl.position.set(GREEN.x, heightAt(GREEN.x, GREEN.z) + 9, GREEN.z); scene.add(gl);
+    // a soft, modest pool of light over the green so it and the flag read a little brighter than the field (no stage glare)
+    const gl = new THREE.PointLight(0xfff0dc, 150, 34, 1.6); gl.position.set(GREEN.x, heightAt(GREEN.x, GREEN.z) + 10, GREEN.z); scene.add(gl);
   }
   W0.aimLine = new Ribbon(200, 0xe1f5f3, 0.7, 0.0022, 0.03); scene.add(W0.aimLine.mesh);
   W0.marker = createMarker(); scene.add(W0.marker);
@@ -240,7 +240,8 @@ async function build() {
     W0.rain.frustumCulled = false; W0.rainPos = pos; scene.add(W0.rain);
   }
   await loadStep('Lighting the scene', 0.9);
-  const sd = sceneDate(params.get('time') || (SENSORIO ? 'dusk' : null));   // the Field of Light is played at dusk unless ?time= says otherwise simDate = sd.date; timeOverride = sd.override;
+  // the Field of Light is played at dusk unless ?time= says otherwise
+  const sd = sceneDate(params.get('time') || (SENSORIO ? 'dusk' : null)); simDate = sd.date; timeOverride = sd.override;
   applyLook();
   resize();
   setQuality(qLevel, false);
@@ -1390,6 +1391,7 @@ if (TEST) {
     panAt: (sec) => { pan.t = sec; if (G.state === 'pan') applyPan(sec); }, panLift: (m) => { pan.up = m; pan.legs = null; }, heightAt,
     get panState() { return { t: pan.t, dur: pan.dur, active: G.state === 'pan', legs: pan.legs, pos: pan.pos && pan.pos.toArray() }; },
     finishMove: () => { if (cam.to) { cam.tt = cam.dur; } },
+    projGreen: () => { const v = new THREE.Vector3(GREEN.x, heightAt(GREEN.x, GREEN.z), GREEN.z).project(camera); return [(v.x + 1) / 2, (1 - v.y) / 2]; },
     placeNearCup: (d = 0.9) => {
       const a = Math.atan2(TEE.x - CUP.x, TEE.z - CUP.z);
       ball.place(CUP.x + Math.sin(a) * d, CUP.z + Math.cos(a) * d); prepareShot(0.3); setClub('putter', true); tweenTo(aimPose(), 0.3);
