@@ -243,7 +243,7 @@ async function build() {
   // the Field of Light only glows after dark: it uses the real clock once the sun is down, and before that the
   // scene is lit as night while the HUD still shows the real time
   const tp = params.get('time');
-  const sensorioDay = SENSORIO && !tp && sunPosition(new Date(), MAP.lat, MAP.lon).elevation > -6;
+  const sensorioDay = false; // Field of Light follows the real sky like the other holes
   const sd = sceneDate(tp || (sensorioDay ? 'night' : null)); simDate = sd.date; timeOverride = sd.override; lightsOnly = sensorioDay;
   applyLook();
   resize();
@@ -284,8 +284,8 @@ function applyLook() {
     const keep = Math.min(0.9, look.cloud * 0.5 + look.fog * 0.8), low = 1 - THREE.MathUtils.smoothstep(sp.elevation, 4, 25);
     look.zen.lerp(tmpC.set('#5f93cc'), 0.7 * (1 - keep)); look.hor.lerp(tmpC.set('#e3e2d6').lerp(tmpC2.set('#efdcb6'), low * 0.6), 0.65 * (1 - keep));
   }
-  if (SENSORIO) {
-    // the Field of Light at dusk: a deep blue to violet sky with a faint orange glow low on the horizon
+  if (SENSORIO && night > 0.5) {
+    // the Field of Light after dark: a deep blue to violet sky with a faint orange glow low on the horizon
     look.zen.set('#0b1238'); look.hor.set('#3a2a5c').lerp(tmpC.set('#c9743e'), 0.22);
   }
   hemi.color.copy(look.hemiS); hemi.groundColor.copy(look.hemiG); hemi.intensity = look.hemiI * 0.78 * (1 + night * 0.15) * (1 + Math.max(0, Math.min(1, 1 - sp.elevation / 12)) * 0.7 * (1 - night));
@@ -315,8 +315,8 @@ function applyLook() {
   if (night > 0.5) { fill.color.set(0x7c94cc); fill.intensity = 0.55; }
   else { fill.color.copy(look.hor).lerp(new THREE.Color(0xffc08a), low * 0.6); fill.intensity = 0.25 + low * 0.75; }
   if (BISHOP && night < 0.5) { fill.color.lerp(tmpC.set('#d4dae0'), 0.6); fill.intensity = 0.25 + low * 0.35; }
-  if (SENSORIO) {
-    // low light so the orbs pop; a soft cool moon fill keeps the green and apron readable
+  if (SENSORIO && night > 0.5) {
+    // after dark: low light so the orbs pop; a soft cool moon fill keeps the green and apron readable
     hemi.color.set('#4a5a8c'); hemi.groundColor.set('#141020'); hemi.intensity = 0.55; sun.color.set('#9fb4ff'); sun.intensity = 0.7;
     fill.color.set('#8aa0d8'); fill.intensity = 0.5; scene.fog.color.set('#2a2248'); renderer.toneMappingExposure = look.exp;
   }
