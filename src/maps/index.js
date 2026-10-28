@@ -1,8 +1,9 @@
 // The playable maps and which one is active. The choice is made once per page load (the course data is bound at import
-// time): ?map=morro|bishop|pismo wins, then the last pick saved in localStorage, then Morro Rock.
+// time): ?map=morro|bishop|pismo|sensorio wins, then the last pick saved in localStorage, then Morro Rock.
 import * as morro from './morro.js';
 import * as bishop from './bishop.js';
 import * as pismo from './pismo.js';
+import * as sensorio from './sensorio.js';
 
 export const MAPS = {
   morro: {
@@ -20,6 +21,11 @@ export const MAPS = {
     blurb: 'Par 5 from the Pismo Beach Pier down the beach to the Oceano Dunes.', short: 'Par 5 · beach links', fogScale: 0.8,
     cap: 'carry Pismo Creek, down the beach to the dunes', loaderSub: 'Par 5 down Pismo State Beach, played under live Pismo Beach weather.',
   },
+  sensorio: {
+    id: 'sensorio', name: 'Field of Light', course: sensorio, place: 'Paso Robles', lat: sensorio.SITE.lat, lon: sensorio.SITE.lon, weatherLat: sensorio.SITE.lat, weatherLon: sensorio.SITE.lon,
+    blurb: "Par 3 across Bruce Munro's Field of Light at Sensorio, from a hillside tee to a green among the glowing spheres.", short: 'Par 3 · field of light', fogScale: 0.3,
+    cap: 'down the hill across the Field of Light', loaderSub: "Par 3 across Bruce Munro's Field of Light at Sensorio, played under live Paso Robles weather.",
+  },
 };
 export const MAP_KEYS = Object.keys(MAPS);
 const norm = (s) => { s = String(s || '').toLowerCase(); return Object.keys(MAPS).find((k) => s.startsWith(k)) || null; };
@@ -31,6 +37,6 @@ function pick() {
 }
 export const MAP_ID = pick();
 export const MAP = MAPS[MAP_ID];
-// the hole's number is its place in the hole list (Morro 1, Bishop 2, Pismo 3, ...): the HUD label and the pin flag use it
+// the hole's number is its place in the hole list (Morro 1, Bishop 2, Pismo 3, Field of Light 4): the HUD label and the pin flag use it
 export const HOLE_NO = MAP_KEYS.indexOf(MAP_ID) + 1;
 export function rememberMap(id) { try { localStorage.setItem('cg-map', id); } catch (e) { /* storage blocked */ } }

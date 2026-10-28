@@ -4,6 +4,8 @@ import { TEE, CUP, GREEN, PAR, HOLE_M, HOLE_YD, ROCK, STACKS, BOUNDS, HEADING, M
 import { MAP, MAPS, MAP_KEYS, HOLE_NO, rememberMap } from './maps/index.js';
 import * as bishop from './maps/bishop.js';
 import * as pismo from './maps/pismo.js';
+import * as sensorio from './maps/sensorio.js';
+import { createSensorioScene } from './sensorio-scene.js';
 import { landColor, createBackdrop, createBishopKnobs, createCerroM, createMadonnaInn, createInnSign, createDryGrass, createChaparral, createGranite, createFarOaks } from './bishop-scene.js';
 import { sunPosition, sceneDate, laClock, lookFor } from './sun.js';
 import { getWeather, compass, windVector } from './weather.js';
@@ -28,8 +30,10 @@ const BISHOP = MAP_ID === 'bishop';
 // every non-Bishop map is a coastal one (ocean, surf, gulls, coastal planting); only Morro Rock has the Rock, its stacks,
 // beacons, wisps and boats. Pismo Pier is coastal without them.
 const PISMO = MAP_ID === 'pismo', HAS_ROCK = MAP_ID === 'morro';
+// Field of Light (Sensorio, Paso Robles): inland, no sea, no Rock; it rides the coastal code paths with its water hidden
+const SENSORIO = MAP_ID === 'sensorio';
 // the landmark the hero shots frame: Morro Rock, Bishop Peak's summit knobs, or the Oceano dunes behind the Pismo green
-const FOCUS = BISHOP ? bishop.LM.bishop : PISMO ? { x: GREEN.x - 40, z: GREEN.z - 110 } : ROCK;
+const FOCUS = BISHOP ? bishop.LM.bishop : SENSORIO ? { x: GREEN.x, z: GREEN.z - 60 } : PISMO ? { x: GREEN.x - 40, z: GREEN.z - 110 } : ROCK;
 // the first shot's aim point when the cup is round a corner
 const AIM_VIA = BISHOP ? bishop.AIM_VIA : PISMO ? pismo.AIM_VIA : null;
 const touch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 1;
@@ -102,9 +106,10 @@ async function build() {
   const depthTex = bakeDepth(512, HAS_ROCK);
   const patches = BISHOP
     ? { corridor: { minX: -50, maxX: 235, minZ: -125, maxZ: 330 }, green: { minX: GREEN.x - 32, maxX: GREEN.x + 32, minZ: GREEN.z - 28, maxZ: GREEN.z + 30 } }
+    : SENSORIO ? { corridor: { minX: Math.min(TEE.x, GREEN.x) - 40, maxX: Math.max(TEE.x, GREEN.x) + 40, minZ: GREEN.z - 30, maxZ: TEE.z + 25 }, green: { minX: GREEN.x - 32, maxX: GREEN.x + 32, minZ: GREEN.z - 28, maxZ: GREEN.z + 30 } }
     : PISMO ? { corridor: { minX: -95, maxX: 65, minZ: -548, maxZ: -10 }, green: { minX: GREEN.x - 32, maxX: GREEN.x + 32, minZ: GREEN.z - 28, maxZ: GREEN.z + 30 } }
     : { corridor: { minX: -60, maxX: 80, minZ: -178, maxZ: 232 }, green: { minX: -28, maxX: 32, minZ: -165, maxZ: -115 } };
-  const style = BISHOP ? 'inland' : PISMO ? 'pismo' : 'coast';
+  const style = BISHOP ? 'inland' : PISMO ? 'pismo' : 'coast';   // Sensorio: green coastal grass for now (job 40 restyles the field)
   // Bishop's outer ground is mostly rough beyond the corridor patch (the real hills carry the detail): a lighter grid
   const tk = BISHOP ? 0.76 : 1;
   const baseColor = BISHOP ? landColor : null;
@@ -122,6 +127,7 @@ async function build() {
     const u = W0.water.uniforms; u.uSurf.value = 0; u.uCalm.value = 0.28; u.uRock.value.set(1e5, 1e5, 1, 1); u.uRockH.value = 1;
     u.uDeep.value.set('#1c3a2c'); u.uMid.value.set('#2d5a3c'); u.uShallow.value.set('#58804a'); u.uSandy.value.set('#8a9358');
   } else W0.water = createWater({ depthTex, bounds: BOUNDS, segments: qLevel === 'high' && touch ? 110 : L.water });
+  if (SENSORIO) W0.water.mesh.visible = false;   // no sea or pond at Sensorio
   if (PISMO) {
     // a wider surf zone of rolling white-water lines from the WNW swell, and a little foam round the pier pilings
     const u = W0.water.uniforms; u.uBreak.value = 1; u.uPier.value.set(PIER_AXIS.ax, PIER_AXIS.az, PIER_AXIS.bx, PIER_AXIS.bz);
@@ -131,14 +137,24 @@ async function build() {
   if (BISHOP) {
     W0.backdrop = createBackdrop(qLevel === 'high' && !touch ? 'high' : qLevel === 'low' ? 'low' : 'med'); scene.add(W0.backdrop);
     scene.add(createFarOaks(qLevel === 'high' ? (touch ? 2400 : 5000) : qLevel === 'med' ? 1700 : 1000, W0.backdrop.userData.surfaceY, qLevel === 'low' ? 0 : qLevel === 'high' && !touch ? 600 : 260));
-  } else if (PISMO) { W0.backdrop = createPismoBackdrop(); scene.add(W0.backdrop); } else scene.add(createHills());
-  await loadStep(BISHOP ? 'Raising Bishop Peak' : PISMO ? 'Raising the Oceano Dunes' : 'Raising Morro Rock', 0.35);
+  } else if (PISMO) { W0.backdrop = createPismoBackdrop(); scene.add(W0.backdrop); } else if (!SENSORIO) scene.add(createHills());
+  await loadStep(BISHOP ? 'Raising Bishop Peak' : SENSORIO ? 'Lighting the Field of Light' : PISMO ? 'Raising the Oceano Dunes' : 'Raising Morro Rock', 0.35);
   if (BISHOP) {
     const knobs = createBishopKnobs(qLevel === 'high' && !touch ? 2 : 1); W0.crest = knobs.userData.crest; W0.rock = knobs; scene.add(knobs);
     const sy = W0.backdrop.userData.surfaceY;
     W0.cerroM = createCerroM(sy); scene.add(W0.cerroM); W0.inn = createMadonnaInn(sy); scene.add(W0.inn); W0.innSign = createInnSign(sy); scene.add(W0.innSign);
     W0.boats = inert(); W0.mist = { group: new THREE.Group(), uniforms: { uCol: { value: new THREE.Color() }, uAmt: { value: 0 }, uTime: { value: 0 } } };
     W0.wisps = { points: new THREE.Group(), uniforms: { uCol: { value: new THREE.Color() }, uWind: { value: new THREE.Vector2() }, uTime: { value: 0 }, uScale: { value: 0 } } };
+    W0.bmat = { color: new THREE.Color() };
+  } else if (SENSORIO) {
+    // no Rock, sea, wisps or boats: the scene dressing (the sphere field) lives in sensorio-scene.js; the hero framing reads
+    // the hill behind the green as its "crest"
+    const ss = createSensorioScene(qLevel); scene.add(ss); W0.sensorioInfo = ss.userData.info;
+    W0.crest = [];
+    for (let x = GREEN.x - 120; x <= GREEN.x + 120; x += 10) for (let z = GREEN.z - 220; z <= GREEN.z - 60; z += 10) W0.crest.push(new V3(x, heightAt(x, z), z));
+    W0.rock = null; W0.boats = inert();
+    W0.wisps = { points: new THREE.Group(), uniforms: { uCol: { value: new THREE.Color() }, uWind: { value: new THREE.Vector2() }, uTime: { value: 0 }, uScale: { value: 0 } } };
+    W0.mist = { group: new THREE.Group(), uniforms: { uCol: { value: new THREE.Color() }, uAmt: { value: 0 }, uTime: { value: 0 } } };
     W0.bmat = { color: new THREE.Color() };
   } else if (PISMO) {
     // no Rock, stacks, beacons, wisps or boats; the hero framing reads the dune ridge behind the green as its "crest".
@@ -164,7 +180,7 @@ async function build() {
   W0.flag = createFlag(); scene.add(W0.flag.group);
   scene.add(createTeeMarkers());
   W0.peg = createTeePeg(); scene.add(W0.peg);
-  if (BISHOP) W0.gulls = inert(); else { W0.gulls = createGulls(touch ? 7 : 11); }
+  if (BISHOP || SENSORIO) W0.gulls = inert(); else { W0.gulls = createGulls(touch ? 7 : 11); }
   scene.add(W0.gulls);
   await loadStep(BISHOP ? 'Planting oaks and golden grass' : 'Planting cypress and dune grass', 0.55);
   // scatter is thinned by distance from the camera every few metres it moves (see updateLod); reach: how far each kind
@@ -172,6 +188,9 @@ async function build() {
   if (BISHOP) {
     W0.scatter = { grass: createDryGrass(touch ? 9000 : 20000, touch ? 650 : 1000), rocks: createGranite(touch ? 240 : 420), shrubs: createChaparral(touch ? 700 : 1100, W0.backdrop.userData.surfaceY) };
     W0.reach = { grass: 1, rocks: 1.8, shrubs: 1.8 };
+  } else if (SENSORIO) {
+    W0.scatter = { grass: createGrass(touch ? 6000 : 12000, touch ? 650 : 1000) };
+    W0.reach = { grass: 1 };
   } else if (PISMO) {
     // the shared coastal instancers re-planted on Pismo's dunes (pismo-veg.js); no beach rocks or meadow flowers on this sand
     const ng = touch ? 9000 : 20000, ni = touch ? 1400 : 2600, ns = touch ? 700 : 1100;
@@ -182,7 +201,7 @@ async function build() {
     W0.reach = { grass: 1, flowers: 0.8, ice: 1.4, rocks: 1.6, drift: 1.6, shrubs: 1.7 };
   }
   for (const m of Object.values(W0.scatter)) { lodScatter(m); scene.add(m); }
-  W0.trees = createTrees(qLevel, PISMO ? townTreeSpots() : null); scene.add(W0.trees);
+  W0.trees = createTrees(qLevel, PISMO ? townTreeSpots() : SENSORIO ? sensorio.OAKS.map((t, i) => ({ kind: 'oak', x: t.x, z: t.z, sc: t.sc, pri: i })) : null); scene.add(W0.trees);
   // ball, effects
   W0.ballMesh = createBall(); scene.add(W0.ballMesh);
   W0.tracer = new Ribbon(260, 0xf2fbfa, 0.6, 0.003, 0.016); scene.add(W0.tracer.mesh);
@@ -211,11 +230,11 @@ async function build() {
     W0.rain.frustumCulled = false; W0.rainPos = pos; scene.add(W0.rain);
   }
   await loadStep('Lighting the scene', 0.9);
-  const sd = sceneDate(params.get('time')); simDate = sd.date; timeOverride = sd.override;
+  const sd = sceneDate(params.get('time') || (SENSORIO ? 'dusk' : null));   // the Field of Light is played at dusk unless ?time= says otherwise simDate = sd.date; timeOverride = sd.override;
   applyLook();
   resize();
   setQuality(qLevel, false);
-  if (BISHOP) camera.position.set(-120, 60, 120); else if (PISMO) camera.position.set(140, 50, 80); else camera.position.set(-260, 60, -470);
+  if (BISHOP) camera.position.set(-120, 60, 120); else if (PISMO) camera.position.set(140, 50, 80); else if (SENSORIO) camera.position.set(TEE.x - 60, TEE.h + 60, TEE.z + 120); else camera.position.set(-260, 60, -470);
   camera.lookAt(FOCUS.x, 60, FOCUS.z);
   renderer.compile(scene, camera);
   post.render();
@@ -225,12 +244,12 @@ async function build() {
 $('hole-text').textContent = `Hole ${HOLE_NO} · ${MAP.name} · Par ${PAR} · ${HOLE_YD} yd`;
 $('fly-sub').textContent = `Par ${PAR} · ${HOLE_YD} yd · ${MAP.cap}`;
 if (MAP_ID !== 'morro') {
-  document.title = `Coastline Golf · ${MAP.name}`; $('scene').setAttribute('aria-label', BISHOP ? '3D golf hole below Bishop Peak, San Luis Obispo' : '3D golf hole down Pismo State Beach from the Pismo Pier to the Oceano Dunes');
+  document.title = `Coastline Golf · ${MAP.name}`; $('scene').setAttribute('aria-label', BISHOP ? '3D golf hole below Bishop Peak, San Luis Obispo' : SENSORIO ? "3D par 3 across Bruce Munro's Field of Light at Sensorio, Paso Robles" : '3D golf hole down Pismo State Beach from the Pismo Pier to the Oceano Dunes');
   document.querySelector('#flytitle h2').textContent = MAP.name; document.querySelector('#loader h1').textContent = `Hole ${HOLE_NO} · ${MAP.name}`;
   document.querySelector('#loader .sub').textContent = MAP.loaderSub; document.querySelector('#endcard .eyebrow').textContent = `Hole ${HOLE_NO} · ${MAP.name}`;
-  document.getElementById('info-wx').innerHTML = `<b>Open-Meteo live weather</b> for ${MAP.place}: real wind pushes your ball, visibility thickens the ${BISHOP ? 'valley' : 'sea'} haze, cloud cover greys the sky.`;
+  document.getElementById('info-wx').innerHTML = `<b>Open-Meteo live weather</b> for ${MAP.place}: real wind pushes your ball, visibility thickens the ${BISHOP ? 'valley' : SENSORIO ? 'hill' : 'sea'} haze, cloud cover greys the sky.`;
   document.getElementById('info-sun').innerHTML = `<b>The real sun</b>: solar position over ${MAP.place} at the current California time sets the light, from morning haze to golden hour to moonlight.`;
-  document.getElementById('info-map').hidden = false; document.getElementById('info-map').innerHTML = PISMO ? '<b>Real-world mapping</b>: the hole runs from the Pismo Beach Pier down Pismo State Beach, across the Pismo Creek mouth, to the Oceano Dunes, laid out from OpenStreetMap and real elevation data (the beach between is shortened ~8x along the shore).<br><small>Pier outline, buildings and shoreline © OpenStreetMap contributors (ODbL); elevation: AWS Terrain Tiles (USGS 3DEP/SRTM).</small>' : '<b>Real-world mapping</b>: Bishop Peak, Cerro San Luis Obispo (and its "M"), the Madonna Inn and the Nine Sisters stand at their true bearings and distances, on real elevation data (Mapzen Terrain Tiles / AWS Open Data, including USGS 3DEP and SRTM).';
+  document.getElementById('info-map').hidden = false; document.getElementById('info-map').innerHTML = SENSORIO ? '<b>Real-world mapping</b>: the hole is laid out true to scale on the rolling hills of Sensorio, east of Paso Robles, from OpenStreetMap and real elevation data. Field of Light by Bruce Munro, at Sensorio, Paso Robles.<br><small>Installation outline and paths © OpenStreetMap contributors (ODbL); elevation: AWS Terrain Tiles (USGS 3DEP/SRTM).</small>' : PISMO ? '<b>Real-world mapping</b>: the hole runs from the Pismo Beach Pier down Pismo State Beach, across the Pismo Creek mouth, to the Oceano Dunes, laid out from OpenStreetMap and real elevation data (the beach between is shortened ~8x along the shore).<br><small>Pier outline, buildings and shoreline © OpenStreetMap contributors (ODbL); elevation: AWS Terrain Tiles (USGS 3DEP/SRTM).</small>' : '<b>Real-world mapping</b>: Bishop Peak, Cerro San Luis Obispo (and its "M"), the Madonna Inn and the Nine Sisters stand at their true bearings and distances, on real elevation data (Mapzen Terrain Tiles / AWS Open Data, including USGS 3DEP and SRTM).';
 }
 
 // ---------- light, sky, fog from real time + weather ----------
@@ -585,6 +604,20 @@ function buildFlyover() {
       f(10.0, 30, 30, 120, -20, 18, 260),
       f(12.6, ...panPos(0, true).toArray(), ...panLook(0)),   // lands on the tee camera already turned onto the Madonna Inn: the opening pan takes over
     ];
+    fly.path = keyPath(keys); fly.dur = keys[keys.length - 1][0]; fly.keys = keys;
+    return;
+  }
+  if (SENSORIO) {
+    // high and behind the tee on the south-west knoll, over the tee and down across the field to the green, a turn round
+    // the flag, then back up the hole onto the tee aim view
+    const dx = c.x - TEE.x, dz = c.z - TEE.z, L = Math.hypot(dx, dz), ux = dx / L, uz = dz / L, ty = TEE.h;
+    const keys = [
+      [0.0, TEE.x - ux * 90, ty + 55, TEE.z - uz * 90, c.x, c.y, c.z],
+      [3.0, TEE.x - ux * 10, ty + 30, TEE.z - uz * 10, c.x, c.y, c.z],
+      [6.0, TEE.x + ux * L * 0.6 + uz * 25, ty + 22, TEE.z + uz * L * 0.6 - ux * 25, c.x, c.y, c.z],
+      [8.4, c.x + ux * 35 - uz * 20, c.y + 16, c.z + uz * 35 + ux * 20, c.x, c.y, c.z],
+      [12.0, e.x, e.y, e.z, l.x, l.y, l.z],
+    ].map(([t, ...r]) => [t * k, ...r]);
     fly.path = keyPath(keys); fly.dur = keys[keys.length - 1][0]; fly.keys = keys;
     return;
   }
@@ -1248,7 +1281,7 @@ if (TEST) {
     hole: { par: PAR, yd: HOLE_YD, m: HOLE_M, no: HOLE_NO, get flagNo() { return W0.flag && W0.flag.number; } },
     map: { id: MAP_ID, name: MAP.name, lat: MAP.lat, lon: MAP.lon, weatherLat: MAP.weatherLat, weatherLon: MAP.weatherLon, heading: HEADING },
     // real-world mapping of the Bishop Peak hole: tee / corner / cup as lat-lon, and the landmarks' lat-lon with their world positions
-    geo: PISMO ? { tee: pismo.worldToLl(TEE.x, TEE.z), cup: pismo.worldToLl(CUP.x, CUP.z), green: pismo.worldToLl(GREEN.x, GREEN.z), site: pismo.SITE } : BISHOP ? { tee: bishop.worldToLl(TEE.x, TEE.z), corner: bishop.worldToLl(bishop.CORNER.x, bishop.CORNER.z), cup: bishop.worldToLl(CUP.x, CUP.z), site: bishop.SITE, landmarks: bishop.LM } : null,
+    geo: SENSORIO ? { tee: sensorio.worldToLl(TEE.x, TEE.z), cup: sensorio.worldToLl(CUP.x, CUP.z), green: sensorio.worldToLl(GREEN.x, GREEN.z), site: sensorio.SITE } : PISMO ? { tee: pismo.worldToLl(TEE.x, TEE.z), cup: pismo.worldToLl(CUP.x, CUP.z), green: pismo.worldToLl(GREEN.x, GREEN.z), site: pismo.SITE } : BISHOP ? { tee: bishop.worldToLl(TEE.x, TEE.z), corner: bishop.worldToLl(bishop.CORNER.x, bishop.CORNER.z), cup: bishop.worldToLl(CUP.x, CUP.z), site: bishop.SITE, landmarks: bishop.LM } : null,
     W0, surfY: () => W0.backdrop && W0.backdrop.userData.surfaceY, camera,
     probe: TEST && BISHOP ? { fairwayDist, llToWorld: bishop.llToWorld } : null,
     get pismo() { return PISMO ? W0.pismoInfo || null : null; },
