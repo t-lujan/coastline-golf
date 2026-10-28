@@ -38,6 +38,10 @@ export function createFlag() {
   const ftex = flagTexture(), fmat = new THREE.MeshLambertMaterial({ map: ftex, emissiveMap: ftex, emissive: 0x3a4646, side: THREE.DoubleSide });
   fmat.onBeforeCompile = (sh) => {
     lessFog(sh);
+    // the cloth is double-sided: flip the texture on the back face so the number never reads mirrored
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <map_fragment>', THREE.ShaderChunk.map_fragment.replace('vMapUv', '(gl_FrontFacing ? vMapUv : vec2(1.0 - vMapUv.x, vMapUv.y))'))
+      .replace('#include <emissivemap_fragment>', THREE.ShaderChunk.emissivemap_fragment.replace('vEmissiveMapUv', '(gl_FrontFacing ? vEmissiveMapUv : vec2(1.0 - vEmissiveMapUv.x, vEmissiveMapUv.y))'));
     sh.uniforms.uTime = uniforms.uTime; sh.uniforms.uWind = uniforms.uWind; sh.uniforms.uLie = uniforms.uLie;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime, uWind, uLie;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
