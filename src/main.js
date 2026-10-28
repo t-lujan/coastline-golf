@@ -259,7 +259,7 @@ $('hole-text').textContent = `Hole ${HOLE_NO} · ${MAP.name} · Par ${PAR} · ${
 $('fly-sub').textContent = SENSORIO ? `Par ${PAR} · ${HOLE_YD} yd · plays ~${sensorio.PLAYS_YD} yd from the raised tee` : `Par ${PAR} · ${HOLE_YD} yd · ${MAP.cap}`;
 if (MAP_ID !== 'morro') {
   document.title = `Coastline Golf · ${MAP.name}`; $('scene').setAttribute('aria-label', BISHOP ? '3D golf hole below Bishop Peak, San Luis Obispo' : SENSORIO ? "3D par 3 across Bruce Munro's Field of Light at Sensorio, Paso Robles" : '3D golf hole down Pismo State Beach from the Pismo Pier to the Oceano Dunes');
-  document.querySelector('#flytitle h2').textContent = MAP.name; document.querySelector('#loader h1').textContent = `Hole ${HOLE_NO} · ${MAP.name}`;
+  document.querySelector('#flytitle h2').textContent = MAP.name; document.querySelector('#flytitle .eyebrow').textContent = `Hole ${HOLE_NO}`; document.querySelector('#loader h1').textContent = `Hole ${HOLE_NO} · ${MAP.name}`;
   document.querySelector('#loader .sub').textContent = MAP.loaderSub; document.querySelector('#endcard .eyebrow').textContent = `Hole ${HOLE_NO} · ${MAP.name}`;
   document.getElementById('info-wx').innerHTML = `<b>Open-Meteo live weather</b> for ${MAP.place}: real wind pushes your ball, visibility thickens the ${BISHOP ? 'valley' : SENSORIO ? 'hill' : 'sea'} haze, cloud cover greys the sky.`;
   document.getElementById('info-sun').innerHTML = `<b>The real sun</b>: solar position over ${MAP.place} at the current California time sets the light, from morning haze to golden hour to moonlight.`;
