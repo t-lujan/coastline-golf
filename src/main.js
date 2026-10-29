@@ -256,7 +256,7 @@ async function build() {
 }
 // par and yardage come from the course itself (centre-line length, tee -> dogleg corner -> cup)
 $('hole-text').textContent = `Hole ${HOLE_NO} · ${MAP.name} · Par ${PAR} · ${HOLE_YD} yd`;
-$('fly-sub').textContent = SENSORIO ? `Par ${PAR} · ${HOLE_YD} yd · plays ~${sensorio.PLAYS_YD} yd from the raised tee` : `Par ${PAR} · ${HOLE_YD} yd · ${MAP.cap}`;
+$('fly-sub').textContent = `Par ${PAR} · ${HOLE_YD} yd · ${MAP.cap}`;
 if (MAP_ID !== 'morro') {
   document.title = `Coastline Golf · ${MAP.name}`; $('scene').setAttribute('aria-label', BISHOP ? '3D golf hole below Bishop Peak, San Luis Obispo' : SENSORIO ? "3D par 3 across Bruce Munro's Field of Light at Sensorio, Paso Robles" : '3D golf hole down Pismo State Beach from the Pismo Pier to the Oceano Dunes');
   document.querySelector('#flytitle h2').textContent = MAP.name; document.querySelector('#flytitle .eyebrow').textContent = `Hole ${HOLE_NO}`; document.querySelector('#loader h1').textContent = `Hole ${HOLE_NO} · ${MAP.name}`;
