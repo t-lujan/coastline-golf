@@ -1,6 +1,6 @@
 // Tiny synthesised soundscape: surf, gulls, club strike, cup rattle, splash. No audio files.
 export class Audio {
-  constructor() { this.muted = localStorage.getItem('cg-muted') === '1'; this.ctx = null; }
+  constructor({ gulls = true } = {}) { this.gulls = gulls; this.muted = localStorage.getItem('cg-muted') === '1'; this.ctx = null; }
   unlock() {
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
@@ -13,7 +13,7 @@ export class Audio {
     const white = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate), wd = white.getChannelData(0); for (let i = 0; i < wd.length; i++) wd[i] = Math.random() * 2 - 1;
     this.white = white;
     this.surf();
-    this.gullLoop();
+    if (this.gulls) this.gullLoop();
   }
   setMuted(m) { this.muted = m; localStorage.setItem('cg-muted', m ? '1' : '0'); if (this.master) this.master.gain.setTargetAtTime(m ? 0 : 0.9, this.ctx.currentTime, 0.08); }
   src(buf, loop = false) { const s = this.ctx.createBufferSource(); s.buffer = buf; s.loop = loop; return s; }
@@ -71,6 +71,6 @@ export class Audio {
     }
     const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.setValueAtTime(420, t); o.frequency.exponentialRampToValueAtTime(160, t + 0.18); g.gain.setValueAtTime(0.25, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
     o.connect(g).connect(this.master); o.start(t); o.stop(t + 0.3);
-    setTimeout(() => this.gull(), 900);
+    if (this.gulls) setTimeout(() => this.gull(), 900);
   }
 }
