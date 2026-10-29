@@ -86,7 +86,7 @@ let post = null, W = 1, H = 1, dpr = 1, baseFov = 48;
 
 // ---------- world (filled during loading) ----------
 const W0 = {};
-const audio = new Audio({ gulls: !SENSORIO });   // no gulls inland at Paso Robles
+const audio = new Audio({ gulls: !SENSORIO, sea: !SENSORIO });   // Paso Robles is inland: a breeze, no surf or gulls
 let weather = null, look = null, simDate = null, timeOverride = false, lightsOnly = false;
 
 async function loadStep(label, pct) {
