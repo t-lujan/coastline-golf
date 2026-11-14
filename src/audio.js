@@ -1,6 +1,6 @@
 // Tiny synthesised soundscape: surf, gulls, club strike, cup rattle, splash. No audio files.
 export class Audio {
-  constructor({ gulls = true, sea = true } = {}) { this.gulls = gulls; this.sea = sea; this.muted = localStorage.getItem('cg-muted') === '1'; this.ctx = null; }
+  constructor({ gulls = true, sea = true, rain = 0 } = {}) { this.rain = rain; this.gulls = gulls; this.sea = sea; this.muted = localStorage.getItem('cg-muted') === '1'; this.ctx = null; }
   unlock() {
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
@@ -14,6 +14,18 @@ export class Audio {
     this.white = white;
     if (this.sea) this.surf(); else this.breeze();
     if (this.gulls) this.gullLoop();
+    this.setRain(this.rain);
+  }
+  // gentle continuous patter: band-passed white noise (~1800 Hz) over low-passed brown noise (~650 Hz)
+  setRain(level) {
+    this.rain = level || 0;
+    if (!this.ctx) return;
+    if (!this.rainNodes) {
+      const ctx = this.ctx, mk = (buf, type, f, q) => { const s = this.src(buf, true), fl = ctx.createBiquadFilter(), g = ctx.createGain(); fl.type = type; fl.frequency.value = f; fl.Q.value = q; g.gain.value = 0; s.connect(fl).connect(g).connect(this.master); s.start(0, Math.random()); return g; };
+      this.rainNodes = [mk(this.white, 'bandpass', 1800, 0.6), mk(this.noise, 'lowpass', 650, 0.7)];
+    }
+    const k = Math.min(1.2, this.rain), t = this.ctx.currentTime;
+    this.rainNodes[0].gain.setTargetAtTime(0.07 * k, t, 0.5); this.rainNodes[1].gain.setTargetAtTime(0.16 * k, t, 0.5);
   }
   setMuted(m) { this.muted = m; localStorage.setItem('cg-muted', m ? '1' : '0'); if (this.master) this.master.gain.setTargetAtTime(m ? 0 : 0.9, this.ctx.currentTime, 0.08); }
   src(buf, loop = false) { const s = this.ctx.createBufferSource(); s.buffer = buf; s.loop = loop; return s; }

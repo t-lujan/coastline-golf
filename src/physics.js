@@ -62,7 +62,8 @@ export class Ball {
   // a copy that continues exactly where this ball is (used to peek ahead without disturbing the real one)
   clone() { const b = new Ball(); Object.assign(b, this); b.p = { ...this.p }; b.v = { ...this.v }; b.w = { ...this.w }; b.events = []; return b; }
   // yaw: radians, 0 = north (-z), positive turns east (+x). curve: -1 (full draw) .. +1 (full fade), 0 = straight
-  strike(clubKey, power, yaw, wind, curve = 0) {
+  strike(clubKey, power, yaw, wind, curve = 0, rain = 0) {
+    this.rain = Math.max(0, Math.min(1.5, rain || 0));
     const c = CLUBS[clubKey]; this.club = c; this.wind = wind; this.t = 0; this.acc = 0; this.start = { ...this.p };
     const L = lieOf(clubKey, this.lie), putt = clubKey === 'putter';
     const speed = c.vmax * (putt ? Math.pow(power, 1.6) : power) * L.v;
@@ -70,7 +71,8 @@ export class Ball {
     this.v = { x: dx * Math.cos(la) * speed, y: Math.sin(la) * speed, z: dz * Math.cos(la) * speed };
     // backspin axis is horizontal and perpendicular to the line; sidespin axis is vertical (curve > 0: a fade bends right)
     const back = c.spin * L.s * (putt ? 0 : speed / c.vmax), side = -(curve || 0) * c.side * L.s * (L.c || L.s) * speed / c.vmax;
-    this.w = { x: -dz * back, y: side, z: dx * back };
+    const wetSpin = 1 - (this.lie === 'rough' || this.lie === 'waste' ? 0.14 : 0.08) * this.rain;   // wet face / turf: a little less spin
+    this.w = { x: -dz * back * wetSpin, y: side * wetSpin, z: dx * back * wetSpin };
     if (putt) { this.w = { x: this.v.z / BALL_R, y: 0, z: -this.v.x / BALL_R }; }   // a putt leaves the face already rolling
     this.state = putt ? 'roll' : 'flight';
     this.lastDry = { ...this.p }; this.dryT = 0; this.maxH = this.p.y; this.carry = null; this.events = []; this.bounces = 0; this.rollT = 0;
@@ -96,13 +98,15 @@ export class Ball {
     const h = Math.max(0, p.y - this.ground()), hf = 0.4 + Math.min(1, h / 35) * 0.45;
     const rx = v.x - this.wind.x * hf, ry = v.y, rz = v.z - this.wind.z * hf, sp = Math.hypot(rx, ry, rz) || 1e-6;
     const wm = Math.hypot(w.x, w.y, w.z), S = wm * BALL_R / sp;
-    const cd = 0.235 + 0.2 * S + 0.12 * Math.exp(-sp / 12);     // drag coefficient: grows with spin and at low speed
+    const r = this.rain || 0;
+    let cd = 0.235 + 0.2 * S + 0.12 * Math.exp(-sp / 12);     // drag coefficient: grows with spin and at low speed
+    if (r > 0) cd *= 1 + 0.055 * r;                              // rain: denser, wetter air
     const cl = 0.33 * (1 - Math.exp(-S / 0.13));                  // lift saturates at high spin ratio
     let ax = -K_AIR * cd * sp * rx, ay = -G - K_AIR * cd * sp * ry, az = -K_AIR * cd * sp * rz;
     if (wm > 1e-3) {
       const m = K_AIR * cl * sp / wm;          // Magnus: along (spin x relative velocity)
       ax += m * (w.y * rz - w.z * ry); ay += m * (w.z * rx - w.x * rz); az += m * (w.x * ry - w.y * rx);
-      const d = Math.exp(-dt / this.club.spinTau); w.x *= d; w.y *= d; w.z *= d;
+      const d = Math.exp(-dt / this.club.spinTau * (1 + 0.1 * r)); w.x *= d; w.y *= d; w.z *= d;
     }
     v.x += ax * dt; v.y += ay * dt; v.z += az * dt;
     p.x += v.x * dt; p.y += v.y * dt; p.z += v.z * dt;
@@ -114,13 +118,13 @@ export class Ball {
   }
   roll(dt) {
     const p = this.p, v = this.v, w = this.w, R = BALL_R;
-    const surf = this.flat ? 'green' : surfaceAt(p.x, p.z), S = SURF[surf];
+    const surf = this.flat ? 'green' : surfaceAt(p.x, p.z), r = this.rain || 0, S = r > 0 ? { ...SURF[surf], slide: SURF[surf].slide * (1 + 0.15 * r) } : SURF[surf];
     if (surf === 'water') { this.state = 'water'; this.events.push({ type: 'water', at: { ...p } }); return; }
     const n = this.flat ? { x: 0, y: 1, z: 0 } : normalAt(p.x, p.z);
     this.rollT += dt;
     // gravity along the slope (the break on a putt)
     v.x += n.x * n.y * G * dt; v.z += n.z * n.y * G * dt;
-    const slope = Math.hypot(n.x, n.z) * G, fr = rollFriction(surf, p.x, p.z);
+    const slope = Math.hypot(n.x, n.z) * G, fr = rollFriction(surf, p.x, p.z) * (r > 0 ? (surf === 'green' ? 1 + 0.28 * r : surf === 'sand' || surf === 'path' || surf === 'water' ? 1 : 1 + 0.35 * r) : 1);
     // slip of the contact point: forward backspin makes it slide, then the ball grips and rolls
     let ux = v.x + R * w.z, uz = v.z - R * w.x, um = Math.hypot(ux, uz);
     if (um > 0.02) {
@@ -155,7 +159,8 @@ export class Ball {
     // slam dunk
     const dc = Math.hypot(p.x - CUP.x, p.z - CUP.z);
     if (dc < 0.16 && Math.hypot(v.x, v.y, v.z) < 9) { this.hole(); return; }
-    const S = SURF[surf], n = normalAt(p.x, p.z);
+    const r = this.rain || 0, wet = r > 0 && surf !== 'path' && surf !== 'sand';
+    const S = wet ? { ...SURF[surf], e: SURF[surf].e * (1 - 0.35 * r), keep: SURF[surf].keep * (1 - 0.22 * r) } : SURF[surf], n = normalAt(p.x, p.z);
     const vn = v.x * n.x + v.y * n.y + v.z * n.z, vin = -vn;
     let tx = v.x - n.x * vn, ty = v.y - n.y * vn, tz = v.z - n.z * vn;
     // on a green the first two bounces also check by the shot: more grab and a steeper descent bite, a flat low one runs on
@@ -215,8 +220,8 @@ export function flatPuttDist(power) {
   }
   return flatCache.get(k);
 }
-export function predict(start, lie, club, power, yaw, wind, curve = 0, path = null, step = 0.25) {
-  const b = new Ball(); b.p = { ...start }; b.lie = lie; b.strike(club, power, yaw, wind, curve);
+export function predict(start, lie, club, power, yaw, wind, curve = 0, path = null, step = 0.25, rain = 0) {
+  const b = new Ball(); b.p = { ...start }; b.lie = lie; b.strike(club, power, yaw, wind, curve, rain);
   let carryPt = null, last = { ...start };
   if (path) path.push({ ...start });
   for (let i = 0; i < 240 * 20 && (b.state === 'flight' || b.state === 'roll'); i++) {

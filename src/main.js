@@ -232,11 +232,13 @@ async function build() {
   W0.parts = new Particles(900); scene.add(W0.parts.points);
   await loadStep(`Reading ${MAP.place} weather`, 0.75);
   weather = await weatherP;
+  audio.setRain(weather.rain ? weather.rainLevel : 0);
   if (weather.rain) {
-    const n = touch ? 900 : 1800, pos = new Float32Array(n * 6);
-    for (let i = 0; i < n; i++) { const x = (Math.random() - 0.5) * 70, y = Math.random() * 40, z = (Math.random() - 0.5) * 70; pos.set([x, y, z, x, y - 0.5, z], i * 6); }
+    const n = Math.round((touch ? 1400 : 2400) * Math.min(1.4, Math.max(0.75, weather.rainLevel || 1))), pos = new Float32Array(n * 6);
+    const sx = weather.wind.x * 0.06, sz = weather.wind.z * 0.06;
+    for (let i = 0; i < n; i++) { const x = (Math.random() - 0.5) * 42, y = Math.random() * 28 - 10, z = (Math.random() - 0.5) * 42, L = 0.85 + Math.random() * 0.3; pos.set([x, y, z, x - sx * L, y - L, z - sz * L], i * 6); }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    W0.rain = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xcfe0e6, transparent: true, opacity: 0.35, depthWrite: false }));
+    W0.rain = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xdcebf2, transparent: true, opacity: 0.55, depthWrite: false, fog: false }));
     W0.rain.frustumCulled = false; W0.rainPos = pos; scene.add(W0.rain);
   }
   await loadStep('Lighting the scene', 0.9);
@@ -261,7 +263,7 @@ if (MAP_ID !== 'morro') {
   document.title = `Coastline Golf · ${MAP.name}`; $('scene').setAttribute('aria-label', BISHOP ? '3D golf hole below Bishop Peak, San Luis Obispo' : SENSORIO ? "3D par 3 across Bruce Munro's Field of Light at Sensorio, Paso Robles" : '3D golf hole down Pismo State Beach from the Pismo Pier to the Oceano Dunes');
   document.querySelector('#flytitle h2').textContent = MAP.name; document.querySelector('#flytitle .eyebrow').textContent = `Hole ${HOLE_NO}`; document.querySelector('#loader h1').textContent = `Hole ${HOLE_NO} · ${MAP.name}`;
   document.querySelector('#loader .sub').textContent = MAP.loaderSub; document.querySelector('#endcard .eyebrow').textContent = `Hole ${HOLE_NO} · ${MAP.name}`;
-  document.getElementById('info-wx').innerHTML = `<b>Open-Meteo live weather</b> for ${MAP.place}: real wind pushes your ball, visibility thickens the ${BISHOP ? 'valley' : SENSORIO ? 'hill' : 'sea'} haze, cloud cover greys the sky.`;
+  document.getElementById('info-wx').innerHTML = `<b>Open-Meteo live weather</b> for ${MAP.place}: real wind pushes your ball, visibility thickens the ${BISHOP ? 'valley' : SENSORIO ? 'hill' : 'sea'} haze, cloud cover greys the sky. Rain softens the turf and slows the greens.`;
   document.getElementById('info-sun').innerHTML = `<b>The real sun</b>: solar position over ${MAP.place} at the current California time sets the light, from morning haze to golden hour to moonlight.`;
   document.getElementById('info-map').hidden = false; document.getElementById('info-map').innerHTML = SENSORIO ? '<b>Real-world mapping</b>: the hole is laid out true to scale on the rolling hills of Sensorio, east of Paso Robles, from OpenStreetMap and real elevation data. Field of Light by Bruce Munro, at Sensorio, Paso Robles.<br><small>Installation outline and paths © OpenStreetMap contributors (ODbL); elevation: AWS Terrain Tiles (USGS 3DEP/SRTM).</small>' : PISMO ? '<b>Real-world mapping</b>: the hole runs from the Pismo Beach Pier down Pismo State Beach, across the Pismo Creek mouth, to the Oceano Dunes, laid out from OpenStreetMap and real elevation data (the beach between is shortened ~8x along the shore).<br><small>Pier outline, buildings and shoreline © OpenStreetMap contributors (ODbL); elevation: AWS Terrain Tiles (USGS 3DEP/SRTM).</small>' : '<b>Real-world mapping</b>: Bishop Peak, Cerro San Luis Obispo (and its "M"), the Madonna Inn and the Nine Sisters stand at their true bearings and distances, on real elevation data (Mapzen Terrain Tiles / AWS Open Data, including USGS 3DEP and SRTM).';
 }
@@ -352,7 +354,7 @@ function applyLook() {
   // HUD
   const clock = laClock(lightsOnly ? new Date() : simDate);
   let phase = look.elev < -6 ? 'Moonlit night' : look.elev < 0 ? 'Twilight' : look.elev < 9 ? (sp.azimuth > 180 ? 'Golden hour' : 'Sunrise') : weather.fogFactor > 0.4 ? 'Marine layer' : sp.azimuth < 180 && look.elev < 30 ? 'Morning' : 'Daylight';
-  if (weather.rain) phase = look.elev < -6 ? 'Rainy night' : 'Light rain';
+  if (weather.rain) phase = look.elev < -6 ? 'Rainy night' : weather.rainLevel >= 1.2 ? 'Heavy rain' : weather.rainLevel < 0.85 ? 'Light rain' : 'Rain';
   $('wx-text').textContent = `${MAP.place} · ${weather.label.replace(/ \w+$/, '')} ${compass(weather.windFrom)} · ${Math.round(weather.tempF)}°F`;
   $('wx-live').textContent = weather.live ? 'Live' : 'Typical';
   $('wx-live').classList.toggle('off', !weather.live);
@@ -504,7 +506,7 @@ function shoot(club, power, yaw) {
   G.preview = false; G.pvSpot = null; $('pvtap').hidden = true;
   G.shotStart = { ...ball.p }; G.shotFromTee = ball.lie === 'tee'; G.cupCheck = false; G.slowmo = false; G.waterHandled = false;
   ball.lipped = false;
-  ball.strike(club, power, yaw, weather.wind, club === 'putter' ? 0 : G.curve); G.curve = 0; updateCurveHud();
+  ball.strike(club, power, yaw, weather.wind, club === 'putter' ? 0 : G.curve, weather.rainLevel || 0); G.curve = 0; updateCurveHud();
   audio.thwack(club, power);
   if (club !== 'putter') { const sandy = ball.lie === 'sand' || ball.lie === 'waste'; puff(W0.parts, ball.p, sandy ? 'sand' : 'grass', ball.lie === 'sand' ? 1.2 : sandy ? 0.8 : 0.5); }
   W0.tracer.clear(); W0.tracer.push(ball.p);
@@ -1062,9 +1064,12 @@ function update(rdt) {
   if (W0.rain) {
     const P = W0.rainPos, c = camera.position, wx = weather.wind.x * 0.06, wz = weather.wind.z * 0.06, fall = 14 * rdt;
     for (let i = 0; i < P.length; i += 6) {
-      let y = P[i + 1] - fall; let x = P[i] + wx * fall, z = P[i + 2] + wz * fall;
-      if (y < c.y - 12 || Math.abs(x - c.x) > 35 || Math.abs(z - c.z) > 35) { x = c.x + (Math.random() - 0.5) * 70; z = c.z + (Math.random() - 0.5) * 70; y = c.y + 8 + Math.random() * 25; }
-      P[i] = x; P[i + 1] = y; P[i + 2] = z; P[i + 3] = x - wx * 0.6; P[i + 4] = y - 0.55; P[i + 5] = z - wz * 0.6;
+      const L = Math.max(0.85, Math.min(1.15, P[i + 1] - P[i + 4]));
+      let y = P[i + 1] - fall, x = P[i] + wx * fall, z = P[i + 2] + wz * fall;
+      if (y < c.y - 10 || y > c.y + 18.5) y = c.y + 18 - Math.random() * 3;   // fell out the bottom (or camera moved): respawn at the top
+      if (Math.abs(x - c.x) > 21) x = c.x + (Math.random() - 0.5) * 42;
+      if (Math.abs(z - c.z) > 21) z = c.z + (Math.random() - 0.5) * 42;
+      P[i] = x; P[i + 1] = y; P[i + 2] = z; P[i + 3] = x - wx * L; P[i + 4] = y - L; P[i + 5] = z - wz * L;
     }
     W0.rain.geometry.attributes.position.needsUpdate = true;
   }
@@ -1346,7 +1351,7 @@ if (TEST) {
     // runs updateAim for a putter drag of (power, yaw): the straight preview line, its marker and label
     aimLinePts: (power, yaw) => { G.club = 'putter'; aimOv = { power, yaw }; updateAim(); aimOv = null; const m = W0.marker.position; return { pts: G.aimLinePts.map((p) => [p.x, p.z]), marker: [m.x, m.z], label: $('power-label').textContent, flat: flatPuttDist(power) }; },
     sim: (club, power, x, z, lie, yaw = 0, opts = {}) => {
-      const b = new Ball(); b.place(x, z); if (lie) b.lie = lie; b.strike(club, power, yaw, opts.wind || { x: 0, z: 0 }, opts.curve || 0);
+      const b = new Ball(); b.place(x, z); if (lie) b.lie = lie; b.strike(club, power, yaw, opts.wind || { x: 0, z: 0 }, opts.curve || 0, opts.rain ?? 0);
       const fr = opts.frame || DT, y0 = b.p.y; let lip = 0, land = null, flat = null;
       for (let i = 0, n = Math.ceil(60 / fr); i < n && (b.state === 'flight' || b.state === 'roll'); i++) { b.step(fr); if (land === null && b.carry !== null) land = { x: b.p.x, z: b.p.z };
         if (flat === null && b.state === 'flight' && b.v.y < 0 && b.p.y <= y0) flat = Math.hypot(b.p.x - x, b.p.z - z) * YD; /* carry back to launch height */ lip += b.events.filter((e) => e.type === 'lip').length; b.events.length = 0; }

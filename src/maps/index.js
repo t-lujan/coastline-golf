@@ -7,7 +7,7 @@ import * as sensorio from './sensorio.js';
 
 export const MAPS = {
   morro: {
-    id: 'morro', name: 'Morro Rock', course: morro, place: 'Morro Bay', lat: morro.SITE.lat, lon: morro.SITE.lon, weatherLat: 35.37, weatherLon: -120.85,
+    id: 'morro', name: 'Morro Rock', course: morro, place: 'Morro Bay', lat: morro.SITE.lat, lon: morro.SITE.lon, weatherLat: 35.37, weatherLon: -120.85, obsStation: 'KSBP',
     blurb: 'Par 4 on the coast, played to the foot of the Rock.', short: 'Par 4 · links', fogScale: 1,
     cap: 'carry the inlet', loaderSub: 'Par 4 on the San Luis Obispo coast, played under live Morro Bay weather.',
   },
@@ -17,12 +17,12 @@ export const MAPS = {
     cap: 'dogleg right toward Bishop Peak', loaderSub: 'Par 4 in the San Luis Obispo valley, played under live San Luis Obispo weather.',
   },
   pismo: {
-    id: 'pismo', name: 'Pismo Pier', course: pismo, place: 'Pismo Beach', lat: pismo.SITE.lat, lon: pismo.SITE.lon, weatherLat: 35.1388, weatherLon: -120.6431,
+    id: 'pismo', name: 'Pismo Pier', course: pismo, place: 'Pismo Beach', lat: pismo.SITE.lat, lon: pismo.SITE.lon, weatherLat: 35.1388, weatherLon: -120.6431, obsStation: 'KSBP',
     blurb: 'Par 5 from the Pismo Beach Pier down the beach to the Oceano Dunes.', short: 'Par 5 · beach links', fogScale: 0.8,
     cap: 'carry Pismo Creek, down the beach to the dunes', loaderSub: 'Par 5 down Pismo State Beach, played under live Pismo Beach weather.',
   },
   sensorio: {
-    id: 'sensorio', name: 'Field of Light', course: sensorio, place: 'Paso Robles', lat: sensorio.SITE.lat, lon: sensorio.SITE.lon, weatherLat: sensorio.SITE.lat, weatherLon: sensorio.SITE.lon,
+    id: 'sensorio', name: 'Field of Light', course: sensorio, place: 'Paso Robles', lat: sensorio.SITE.lat, lon: sensorio.SITE.lon, weatherLat: sensorio.SITE.lat, weatherLon: sensorio.SITE.lon, obsStation: 'KPRB',
     blurb: "Par 3 across Bruce Munro's Field of Light at Sensorio, from a hillside tee to a green among the glowing spheres.", short: 'Par 3 · field of light', fogScale: 0.3,
     cap: 'down the hill across the Field of Light', loaderSub: "Par 3 across Bruce Munro's Field of Light at Sensorio, played under live Paso Robles weather.",
   },

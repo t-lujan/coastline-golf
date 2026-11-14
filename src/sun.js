@@ -58,6 +58,10 @@ export function lookFor(elev, weather) {
   const grey = new Color('#aeb9bf').multiplyScalar(Math.min(1, 0.35 + Math.max(0, elev + 6) / 30));
   L.zen.lerp(grey, cloud * 0.32 + fog * 0.6); L.hor.lerp(grey.clone().multiplyScalar(1.05), cloud * 0.28 + fog * 0.75);
   L.sunI *= 1 - cloud * 0.35 - fog * 0.4; L.hemiI *= 1 + cloud * 0.12;
+  if (weather?.rain && elev > -6) {   // rain: moodier, cooler sky
+    const k = 0.28 * Math.min(1, weather.rainLevel || 1) * Math.min(1, (elev + 6) / 12), rg = new Color('#7f8d96');
+    L.zen.lerp(rg, k); L.hor.lerp(rg, k); L.sunI *= 1 - 0.3 * k;
+  }
   L.night = elev < -6;
   L.cloud = cloud; L.fog = fog;
   return L;
