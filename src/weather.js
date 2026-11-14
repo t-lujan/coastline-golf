@@ -49,8 +49,10 @@ export async function getWeather(params, map) {
   let w = { ...FALLBACK, windSource: 'fallback' };
   if (params.get('weather') !== 'offline') {
     const station = map.windStation || map.obsStation;
-    const [om, obs] = await Promise.all([getJson(url(map)),
-      station ? getJson(`https://api.weather.gov/stations/${station}/observations?limit=6`) : null]);
+    // don't let a slow Open-Meteo hold up loading: once the NWS station answers, give Open-Meteo 1.5 s more, then go with NWS
+    const omP = getJson(url(map));
+    const obs = station ? await getJson(`https://api.weather.gov/stations/${station}/observations?limit=6`) : null;
+    const om = obs ? await Promise.race([omP, new Promise((r) => setTimeout(() => r(null), 1500))]) : await omP;
     const c = om && om.current;
     const feats = obs && Array.isArray(obs.features) ? obs.features.filter((x) => x && x.properties) : [];
     const fresh = (p) => { const age = Date.now() - Date.parse(p.timestamp); return age > -10 * 60000 && age < 90 * 60000; };
