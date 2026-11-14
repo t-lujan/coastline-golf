@@ -1433,6 +1433,7 @@ window.addEventListener('error', (e) => errors.push(String(e.message)));
     $('start').disabled = false; $('start').textContent = 'Tap to tee off';
     $('load-step').textContent = weather.live ? `Live: ${weather.label}, ${Math.round(weather.tempF)}°F in ${MAP.place}` : `Weather offline · using typical ${MAP.place} conditions`;
     renderer.setAnimationLoop(frame);
+    if (weather.late) weather.late.then((changed) => { if (changed) { $('wx-text').textContent = `${MAP.place} · ${weather.label.replace(/ \w+$/, '')} ${compass(weather.windFrom)} · ${Math.round(weather.tempF)}°F`; updateWindArrow(); } });
     if (params.has('autostart')) $('start').click();
   } catch (e) {
     console.error(e); errors.push(String(e));

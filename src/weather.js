@@ -43,6 +43,16 @@ function nwsRain(p) {
   return { rain: level > 0, level };
 }
 const wmoLevel = (c) => (c >= 95 || c === 65 || c === 82 || c === 67 || c === 57 ? 1.35 : c === 61 || c === 63 || c === 81 || c === 66 ? 1.0 : 0.7);
+// strongest wind among the station's reports from the last 30 min: one calm 5-minute reading shouldn't zero the wind
+function strongestWind(feats) {
+  let best = null;
+  for (const x of feats) {
+    const p = x.properties, sp = p.windSpeed?.value, age = Date.now() - Date.parse(p.timestamp);
+    if (typeof sp === 'number' && age > -10 * 60000 && age < 30 * 60000 && (!best || sp > best.windSpeed.value)) best = p;
+  }
+  return best;
+}
+function finishWind(w) { w.wind = windVector(w.windMph, w.windFrom); w.label = `${Math.round(w.windMph)} mph ${compass(w.windFrom)}`; w.rel = windRel(w.windFrom); }
 const isWmoRain = (c) => (c >= 51 && c <= 67) || (c >= 80 && c <= 82) || c >= 95;
 
 export async function getWeather(params, map) {
@@ -68,7 +78,8 @@ export async function getWeather(params, map) {
         if (nr.rain) { w.cloud = Math.max(w.cloud, 85); w.visibility = Math.min(w.visibility, nVis || 6000); }
       }
     } else if (fp) {
-      const sp = fp.windSpeed?.value, d = fp.windDirection?.value, g = fp.windGust?.value, t = fp.temperature?.value, td = String(fp.textDescription || '');
+      const sw = strongestWind(feats) || fp;
+      const sp = sw.windSpeed?.value, d = sw.windDirection?.value, g = sw.windGust?.value, t = fp.temperature?.value, td = String(fp.textDescription || '');
       w.live = true; w.windSource = station;
       w.tempF = typeof t === 'number' ? t * 9 / 5 + 32 : 61;
       if (typeof sp === 'number') { w.windMph = sp * KMH; if (typeof d === 'number' && w.windMph > 0) w.windFrom = d; w.gustMph = Math.max(w.windMph, typeof g === 'number' ? g * KMH : 0); }
@@ -79,8 +90,7 @@ export async function getWeather(params, map) {
     }
     // Bishop's wind: newest KSBP report with a wind speed, used when stronger than Open-Meteo's
     if (map.windStation) {
-      const f = feats.find((x) => typeof x.properties.windSpeed?.value === 'number');
-      const p = f && f.properties, sp = p && p.windSpeed.value, age = p ? Date.now() - Date.parse(p.timestamp) : NaN;
+      const p = strongestWind(feats), sp = p && p.windSpeed.value, age = p ? Date.now() - Date.parse(p.timestamp) : NaN;
       if (typeof sp === 'number' && age > -10 * 60000 && age < 90 * 60000) {
         const mph = sp * KMH, d = p.windDirection && p.windDirection.value, g = p.windGust && p.windGust.value;
         // use whichever is stronger: the airport can sit calm while it's still breezy at the hole
@@ -92,6 +102,13 @@ export async function getWeather(params, map) {
         }
       }
     }
+    // Open-Meteo answered too late for loading: fold its wind in when it arrives if it's stronger (w.late resolves true when it changed)
+    if (!c && obs) w.late = omP.then((r) => {
+      const lc = r && r.current;
+      if (!lc || params.get('wind') || params.get('weather') === 'windy' || !(lc.wind_speed_10m > w.windMph)) return false;
+      w.windMph = lc.wind_speed_10m; w.windFrom = lc.wind_direction_10m; w.gustMph = Math.max(w.gustMph, lc.wind_gusts_10m ?? 0); w.windSource = 'open-meteo';
+      finishWind(w); return true;
+    });
   }
   // test / showcase overrides
   const o = params.get('weather');
@@ -106,8 +123,6 @@ export async function getWeather(params, map) {
   const fogCodes = w.code === 45 || w.code === 48;
   w.fogFactor = Math.max(fogCodes ? 0.75 : 0, Math.min(1, Math.max(0, (6000 - w.visibility) / 5500)));
   // wind vector in world space (x east, z south): wind blows *toward* windFrom + 180
-  w.wind = windVector(w.windMph, w.windFrom);
-  w.label = `${Math.round(w.windMph)} mph ${compass(w.windFrom)}`;
-  w.rel = windRel(w.windFrom);
+  finishWind(w);
   return w;
 }
